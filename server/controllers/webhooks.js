@@ -3,7 +3,7 @@ import User from '../models/User.js'
 
 // api control function to manage cleark user with database
 
-export const ClerkWebhooks = async()=>{
+export const ClerkWebhooks = async(req, res)=>{
   try {
     const whook = new Webhook(process.env.CLERK_WEBHOOOK_SECRET)
 
@@ -20,7 +20,7 @@ export const ClerkWebhooks = async()=>{
                 _id: data.id,
                 email:data.email_addresses[0].email_address,
                 name: data.first_name + " "+ data.last_name,
-                imageUrl: data.image_Url,
+                imageUrl: data.image_url,
             }
             await User.create(userData)
             res.json({})
