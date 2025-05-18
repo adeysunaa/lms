@@ -40,8 +40,6 @@ const Sidebar = () => {
             <p className="md:block hidden text-center">{item.name}</p>
           </NavLink>
         ))}
-
-        <h1>Side Bar</h1>
       </div>
     )
   );

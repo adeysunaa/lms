@@ -3,7 +3,7 @@ import { Purchase } from "../models/Purchase.js";
 import Stripe from "stripe";
 import Course from '../models/Course.js';
 import { CourseProgress } from '../models/CourseProgress.js';
-
+import mongoose from 'mongoose';
 
 
 //Get user data
@@ -37,59 +37,66 @@ export const userEnrolledCourses = async(req, res)=>{
 }
 
 //Purchase course
-export const purchaseCourse = async(req, res)=>{
+export const purchaseCourse = async (req, res) => {
     try {
-        const {courseId} = req.body
-        const {origin} = req.headers
-        const userId = req.auth.userId
-        const userData = await User.findById(userId)
-        const courseData = await Course.findById(courseId)
-
-        if(!userData || !courseData){
-            return res.json({success: false, message: 'Data Not Found'})
-        }
-
-        const purchaseData = {
-             courseId: courseData._id,
-             userId,
-             amount: (courseData.coursePrice - courseData.discount * courseData.coursePrice/100).toFixed(2),
-        }
-
-        const newPurchase = await Purchase.create(purchaseData)
-
-        //Stripe Gateway Initialize
-        const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY)
-
-        const currency = process.env.CURRENCY.toLowerCase()
-
-        //Create line items to stripe
-        const line_items =[{
-            price_data: {
-                currency,
-                product_data:{
-                    name: courseData.courseTitle
-                },
-                unit_amount: Math.floor(newPurchase.amount) * 100 
+      const { courseId } = req.body;
+  
+      // ✅ Validate courseId early
+      if (!courseId || !mongoose.Types.ObjectId.isValid(courseId)) {
+        return res.status(400).json({ success: false, message: "Invalid course ID" });
+      }
+  
+      const { origin } = req.headers;
+      const userId = req.auth.userId;
+  
+      const userData = await User.findById(userId);
+      const courseData = await Course.findById(courseId);
+  
+      if (!userData || !courseData) {
+        return res.json({ success: false, message: "Data Not Found" });
+      }
+  
+      const purchaseData = {
+        courseId: courseData._id,
+        userId,
+        amount: (courseData.coursePrice - (courseData.discount * courseData.coursePrice) / 100).toFixed(2),
+      };
+  
+      const newPurchase = await Purchase.create(purchaseData);
+  
+      const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
+      const currency = process.env.CURRENCY.toLowerCase();
+  
+      const line_items = [
+        {
+          price_data: {
+            currency,
+            product_data: {
+              name: courseData.courseTitle,
             },
-            quantity: 1
-        }]
-
-        const session = await stripeInstance.checkout.sessions.create({
-            success_url: `${origin}/loading/my-enrollments`, 
-            cancel_url: `${origin}/`,
-            line_items: line_items,
-            mode: 'payment',
-            metadata: {
-                purchaseId: newPurchase._id.toString()
-            }
-        })
-
-        res.json({success: true, success_url: session.url})
-
+            unit_amount: Math.floor(newPurchase.amount * 100),
+          },
+          quantity: 1,
+        },
+      ];
+  
+      const session = await stripeInstance.checkout.sessions.create({
+        success_url: `${origin}/loading/my-enrollments`,
+        cancel_url: `${origin}/`,
+        line_items,
+        mode: "payment",
+        metadata: {
+          purchaseId: newPurchase._id.toString(),
+        },
+      });
+  
+      // ✅ Fix key name to match frontend
+      res.json({ success: true, session_url: session.url });
+  
     } catch (error) {
-        res.json({success: false, message: error.message});
+      res.json({ success: false, message: error.message });
     }
-}
+  };
 
 //Update user course progress
 export const updateUserCourseProgress = async(req, res) => {
