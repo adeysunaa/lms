@@ -6,6 +6,11 @@ export const getAllCourses = async(req, res)=>{
     try {
         const courses = await Course.find({isPublished: true}).select(['-courseContent', '-enrolledStudents']).populate({path:'educator'})
 
+        // Set cache-control headers to prevent caching
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+
         res.json({success: true, courses})
     } catch (error) {
         res.json({success: false, message: error.message});
@@ -27,6 +32,11 @@ export const getCourseId = async(req, res)=>{
                 }
             })
         })
+
+        // Set cache-control headers to prevent caching
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
 
         res.json({success: true, courseData})
     } catch (error) {

@@ -9,11 +9,19 @@ const lectureSchema = new mongoose.Schema({
   lectureOrder: { type: Number, required: true },
 }, { _id: false });
 
+const quizSchema = new mongoose.Schema({
+  quizId: { type: String, required: true },
+  question: { type: String, required: true },
+  options: { type: [String], required: true },
+  correctAnswer: { type: Number, required: true },
+}, { _id: false });
+
 const chapterSchema = new mongoose.Schema({
   chapterId: { type: String, required: true },
   chapterOrder: { type: Number, required: true },
   chapterTitle: { type: String, required: true },
   chapterContent: { type: [lectureSchema], default: [] },
+  quizzes: { type: [quizSchema], default: [] },
 }, { _id: false });
 
 const courseSchema = new mongoose.Schema({

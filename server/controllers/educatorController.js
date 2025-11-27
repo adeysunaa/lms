@@ -1,8 +1,8 @@
-import {clerkClient} from '@clerk/express'
-import Course from '../models/Course.js'
-import {v2 as cloudinary} from 'cloudinary'
-import { Purchase } from '../models/Purchase.js'
-import User from '../models/User.js';
+import { clerkClient } from "@clerk/express";
+import Course from "../models/Course.js";
+import { v2 as cloudinary } from "cloudinary";
+import { Purchase } from "../models/Purchase.js";
+import User from "../models/User.js";
 
 
 
@@ -24,7 +24,7 @@ export const updateRoleToEducator= async(req, res)=>{
 
 // add new course
 
-export const addCourse = async(req, res)=>{
+export const addCourse = async (req, res) => {
     try {
         const {courseData} = req.body
         const imageFile = req.file
@@ -49,7 +49,7 @@ export const addCourse = async(req, res)=>{
         res.json({success: false, message: error.message})
         
     }
-}
+};
 
 //Get educator course
 export const getEducatorCourses = async(req, res)=>{
@@ -62,6 +62,56 @@ export const getEducatorCourses = async(req, res)=>{
         res.json({success: false, message: error.message})
      }
 }
+
+export const getCourseForEdit = async (req, res) => {
+  try {
+    const educator = req.auth.userId;
+    const { courseId } = req.params;
+    const course = await Course.findOne({ _id: courseId, educator });
+
+    if (!course) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Course not found" });
+    }
+
+    res.json({ success: true, course });
+  } catch (error) {
+    res.json({ success: false, message: error.message });
+  }
+};
+
+export const updateCourse = async (req, res) => {
+  try {
+    const educator = req.auth.userId;
+    const { courseId } = req.params;
+    const existingCourse = await Course.findOne({ _id: courseId, educator });
+
+    if (!existingCourse) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Course not found" });
+    }
+
+    const parsedCourseData = JSON.parse(req.body.courseData || "{}");
+    existingCourse.courseTitle = parsedCourseData.courseTitle;
+    existingCourse.courseDescription = parsedCourseData.courseDescription;
+    existingCourse.coursePrice = Number(parsedCourseData.coursePrice);
+    existingCourse.discount = Number(parsedCourseData.discount);
+    existingCourse.courseContent = parsedCourseData.courseContent || [];
+
+    if (req.file) {
+      const imageUpload = await cloudinary.uploader.upload(req.file.path);
+      existingCourse.courseThumbnail = imageUpload.secure_url;
+    }
+
+    await existingCourse.save();
+
+    res.json({ success: true, message: "Course updated successfully" });
+  } catch (error) {
+    res.json({ success: false, message: error.message });
+  }
+};
 
 //Get educator dashboard data (total earning, enrolled student, No. of courses)
 

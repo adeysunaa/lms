@@ -2,7 +2,7 @@ import User from '../models/User.js'
 import { Purchase } from "../models/Purchase.js";
 import Stripe from "stripe";
 import Course from '../models/Course.js';
-import { CourseProgress } from '../models/CourseProgress.js';
+import CourseProgress from '../models/CourseProgress.js';
 import mongoose from 'mongoose';
 
 
@@ -140,6 +140,47 @@ export const getUserCourseProgress = async(req, res)=>{
         res.json({success: false, message: error.message})
     }
 }
+
+// Update video watch time
+export const updateVideoWatchTime = async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+    const { courseId, lectureId, watchTime } = req.body;
+
+    let progressData = await CourseProgress.findOne({ userId, courseId });
+
+    if (!progressData) {
+      progressData = new CourseProgress({
+        userId,
+        courseId,
+        lectureCompleted: [],
+        quizPassed: [],
+        videoWatchTime: {},
+        lastWatchedLecture: lectureId,
+      });
+    }
+
+    // Update video watch time (Mongoose Map or plain object)
+    if (!progressData.videoWatchTime) {
+      progressData.videoWatchTime = {};
+    }
+
+    // Handle both Map and plain object
+    if (progressData.videoWatchTime instanceof Map) {
+      progressData.videoWatchTime.set(lectureId, watchTime);
+    } else {
+      progressData.videoWatchTime[lectureId] = watchTime;
+    }
+    
+    progressData.lastWatchedLecture = lectureId;
+
+    await progressData.save();
+
+    res.json({ success: true, message: 'Watch time updated' });
+  } catch (error) {
+    res.json({ success: false, message: error.message });
+  }
+};
 
 // Add user rating to course
 

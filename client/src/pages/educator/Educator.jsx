@@ -1,17 +1,22 @@
-import React from "react";
+import React, { useState } from "react";
 import { Outlet } from "react-router-dom";
 import Navbar from "../../components/educator/Navbar";
 import Sidebar from "../../components/educator/Sidebar";
 import Footer from "../../components/educator/Footer";
 
 const Educator = () => {
-  return (
-    <div className="text-default min-h-screen bg-white">
-      <Navbar />
-      <div className="flex">
-        <Sidebar />
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-        <div className="flex-1">{<Outlet />}</div>
+  const handleMenuClick = () => {
+    setMobileMenuOpen(!mobileMenuOpen);
+  };
+
+  return (
+    <div className="text-white min-h-screen bg-transparent">
+      <Navbar onMenuClick={handleMenuClick} />
+      <div className="flex w-full items-start">
+        <Sidebar mobileMenuOpen={mobileMenuOpen} setMobileMenuOpen={setMobileMenuOpen} />
+        <main className="flex-1 min-h-screen bg-transparent">{<Outlet />}</main>
       </div>
       <Footer />
     </div>

@@ -8,14 +8,16 @@ const CoursesSection = () => {
 
   return (
     <div className="py-16 md:px-40 px-8">
-      <h2 className="text-3xl font-medium text-gray-800">
-        Learn from the best
-      </h2>
-      <p className="text-sm md:text-base text-gray-500 mt-3">
-        Discover our top-rated courses across various categories. From coding
-        and design to <br /> business and wellness, your courses are crafted to
-        deliver results.
-      </p>
+      <div className="text-center">
+        <h2 className="h2 text-white mb-4">
+          Learn from the best
+        </h2>
+        <p className="body text-white/80 max-w-2xl mx-auto">
+          Discover our top-rated courses across various categories. From coding
+          and design to business and wellness, your courses are crafted to
+          deliver results.
+        </p>
+      </div>
 
       <div className="grid grid-cols-auto px-4 md:px-0 md:my-16 my-10 gap-4">
         {allCourses.slice(0, 4).map((course, index) => (
@@ -23,13 +25,15 @@ const CoursesSection = () => {
         ))}
       </div>
 
-      <Link
-        to={"/course-list"}
-        onClick={() => scrollTo(0, 0)}
-        className="text-gray-500 border border-gray-500/30 px-10 py-3 rounded"
-      >
-        Show all courses
-      </Link>
+      <div className="text-center">
+        <Link
+          to={"/course-list"}
+          onClick={() => scrollTo(0, 0)}
+          className="glass-button text-white border border-white/30 px-10 py-3 rounded-xl inline-block hover:scale-105 transition-all duration-300"
+        >
+          Show all courses
+        </Link>
+      </div>
     </div>
   );
 };

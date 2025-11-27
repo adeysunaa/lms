@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App.jsx";
 import { AppContextProvider } from "./context/AppContext.jsx";
+import { ThemeProvider } from "./context/ThemeContext.jsx";
+import { SessionProvider } from "./context/SessionContext.jsx";
 import { BrowserRouter } from "react-router-dom";
 import { ClerkProvider } from "@clerk/clerk-react";
 
@@ -17,7 +19,11 @@ createRoot(document.getElementById("root")).render(
   <BrowserRouter>
     <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl={"/"}>
       <AppContextProvider>
-        <App />
+        <ThemeProvider>
+          <SessionProvider>
+            <App />
+          </SessionProvider>
+        </ThemeProvider>
       </AppContextProvider>
     </ClerkProvider>
   </BrowserRouter>

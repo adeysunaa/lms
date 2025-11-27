@@ -4,53 +4,53 @@ import { assets } from "../../assets/assets";
 const Footer = () => {
   const currentYear = new Date().getFullYear();
   return (
-    <footer className="bg-gray-900 md:px-36 text-left w-full mt-10">
-      <div className="flex flex-col md:flex-row items-start px-8 md:px-0 justify-center gap-10 md:gap-32 py-10 border-b border-white/30">
+    <footer className="glass-card md:px-36 text-left w-full mt-10 backdrop-blur-xl border-t border-white/20">
+      <div className="flex flex-col md:flex-row items-start px-8 md:px-0 justify-center gap-6 md:gap-16 py-6 border-b border-white/20">
         <div className="flex flex-col md:items-start items-center w-full">
-          <img src={assets.logo_dark} alt="logo " />
-          <p className="mt-6 text-center md:text-left text-sm text-white/80">
+          <img src={assets.logo_dark} alt="logo" className="w-16 lg:w-20 brightness-0 invert" />
+          <p className="body-small mt-4 text-center md:text-left text-white/80">
             Lorem ipsum dolor sit amet, consectetur adipisicing elit. Quisquam,
             placeat sed vel distinctio, possimus tempora adipisci eos
             aspernatur.
           </p>
         </div>
         <div className="flex flex-col md:items-start items-center w-full">
-          <h2 className="font-semibold text-white mb-5">Company</h2>
-          <ul className="flex flex-col w-full justify-between text-sm text-white/80 md:space-y-2">
+          <h3 className="h6 text-white mb-3">Company</h3>
+          <ul className="flex flex-col w-full justify-between caption text-white/80 md:space-y-1">
             <li>
-              <a href="#">Home</a>
+              <a href="#" className="hover:text-white transition-colors">Home</a>
             </li>
             <li>
-              <a href="#">About us</a>
+              <a href="#" className="hover:text-white transition-colors">About us</a>
             </li>
             <li>
-              <a href="#">Contact us</a>
+              <a href="#" className="hover:text-white transition-colors">Contact us</a>
             </li>
             <li>
-              <a href="#">Privacy policy</a>
+              <a href="#" className="hover:text-white transition-colors">Privacy policy</a>
             </li>
           </ul>
         </div>
         <div className="hidden md:flex flex-col items-start w-full">
-          <h2 className="font-semibold text-white mb-5">
+          <h3 className="h6 text-white mb-3">
             Subscribe to our newsletter
-          </h2>
-          <p className="text-sm text-white/80">
+          </h3>
+          <p className="caption text-white/80 mb-3">
             The latest news, articles, and resources, sent to your inbox weekly.
           </p>
-          <div className="flex items-center gap-2 pt-4">
+          <div className="flex items-center gap-2">
             <input
               type="email"
               placeholder="Enter your email"
-              className="border border-gray-500/30 bg-gray-800 text-gray-500 placeholder-gray-500 outline-none w-64 h-9 rounded px-2 text-sm"
+              className="glass-input border border-white/20 text-white placeholder:text-white/50 outline-none w-56 h-8 rounded-lg px-2 text-xs focus:ring-2 focus:ring-blue-400"
             />
-            <button className="bg-blue-600 w-24 h-9 text-white rounded">
+            <button className="bg-gradient-to-r from-blue-500 to-purple-600 w-20 h-8 text-white rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all shadow-lg text-xs">
               Subscribe
             </button>
           </div>
         </div>
       </div>
-      <p className="py-4 text-center text-xs md:text-sm text-white/60">
+      <p className="caption py-3 text-center text-white/60 text-xs">
         Copyright © {currentYear} Mekong-Learning. All Rights Reserved.
       </p>
     </footer>

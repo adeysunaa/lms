@@ -7,7 +7,7 @@ import { toast } from "react-toastify";
 import axios from "axios";
 
 const AddCourse = () => {
-  const { backendUrl, getToken } = useContext(AppContext);
+  const { backendUrl, getToken, fetchAllCourses } = useContext(AppContext);
   const quillRef = useRef(null);
   const editorRef = useRef(null);
 
@@ -17,12 +17,19 @@ const AddCourse = () => {
   const [image, setImage] = useState(null);
   const [chapters, setChapters] = useState([]);
   const [showPopup, setShowPopup] = useState(false);
+  const [showQuizPopup, setShowQuizPopup] = useState(false);
   const [currentChapterId, setCurrentChapterId] = useState(null);
+  const [currentQuizChapterId, setCurrentQuizChapterId] = useState(null);
   const [lectureDetails, setLectureDetails] = useState({
     lectureTitle: "",
     lectureDuration: "",
     lectureUrl: "",
     isPreviewFree: false,
+  });
+  const [quizDetails, setQuizDetails] = useState({
+    question: "",
+    options: ["", "", "", ""],
+    correctIndex: 0,
   });
 
   const handleChapter = (action, chapterId) => {
@@ -33,6 +40,7 @@ const AddCourse = () => {
           chapterId: uniqid(),
           chapterTitle: title,
           chapterContent: [],
+          quizzes: [],
           collapsed: false,
           chapterOrder:
             chapters.length > 0 ? chapters.slice(-1)[0].chapterOrder + 1 : 1,
@@ -70,6 +78,22 @@ const AddCourse = () => {
     }
   };
 
+  const handleQuiz = (action, chapterId, quizIndex) => {
+    if (action === "add") {
+      setCurrentQuizChapterId(chapterId);
+      setShowQuizPopup(true);
+    } else if (action === "remove") {
+      setChapters(
+        chapters.map((chapter) => {
+          if (chapter.chapterId === chapterId) {
+            chapter.quizzes.splice(quizIndex, 1);
+          }
+          return chapter;
+        })
+      );
+    }
+  };
+
   const addLecture = () => {
     setChapters(
       chapters.map((chapter) => {
@@ -93,6 +117,27 @@ const AddCourse = () => {
       lectureDuration: "",
       lectureUrl: "",
       isPreviewFree: false,
+    });
+  };
+
+  const addQuiz = () => {
+    setChapters(
+      chapters.map((chapter) => {
+        if (chapter.chapterId === currentQuizChapterId) {
+          const newQuiz = {
+            ...quizDetails,
+            quizId: uniqid(),
+          };
+          chapter.quizzes = chapter.quizzes ? [...chapter.quizzes, newQuiz] : [newQuiz];
+        }
+        return chapter;
+      })
+    );
+    setShowQuizPopup(false);
+    setQuizDetails({
+      question: "",
+      options: ["", "", "", ""],
+      correctIndex: 0,
     });
   };
 
@@ -124,6 +169,8 @@ const AddCourse = () => {
 
       if (data.success) {
         toast.success(data.message);
+        // Refresh the course list to show new course
+        await fetchAllCourses();
         setCourseTitle("");
         setCoursePrice(0);
         setDiscount(0);
@@ -148,48 +195,42 @@ const AddCourse = () => {
   }, []);
 
   return (
-    <div className="h-screen overflow-scroll flex flex-col items-start justify-between md:p-8 mb:pb-0 p-4 pt-8 pb-0">
+    <div className="min-h-screen overflow-y-auto w-full px-4 md:px-10 py-8 text-white">
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col gap-4 max-w-md w-full text-gray-500"
+        className="glass-card border border-white/10 rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full max-w-4xl mx-auto backdrop-blur-2xl"
       >
-        <div className="flex flex-col gap-1">
-          <p>Course Title</p>
-          <input
-            onChange={(e) => setCourseTitle(e.target.value)}
-            value={courseTitle}
-            type="text"
-            placeholder="Type here"
-            className="outline-none md:py-2.5 py-2 px-3 rounded border border-gray-500"
-            required
-          />
+        <div className="text-center space-y-2">
+          <p className="uppercase text-xs tracking-[0.5em] text-white/60">
+            Course Builder
+          </p>
+          <h2 className="text-2xl font-semibold">Add a New Course</h2>
         </div>
-        <div className="flex flex-col gap-1">
-          <p>Course Description</p>
-          <div ref={editorRef}></div>
-        </div>
-
-        <div className="flex items-center justify-between flex-wrap">
-          <div className="flex flex-col gap-1">
-            <p>Course Price</p>
+        <div className="grid gap-5 md:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <label className="text-sm text-white/70">Course Title</label>
             <input
-              onChange={(e) => setCoursePrice(e.target.value)}
-              value={coursePrice}
-              type="number"
-              placeholder="0"
-              className="outline-none md:py-2.5 py-2 w-28 px-3 rounded border border-gray-500"
+              onChange={(e) => setCourseTitle(e.target.value)}
+              value={courseTitle}
+              type="text"
+              placeholder="e.g., Modern React Bootcamp"
+              className="glass-input border border-white/15 rounded-2xl px-4 py-3 text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400"
               required
             />
           </div>
-
-          <div className="flex md:flex-row flex-col items-center gap-3">
-            <p>Course Thumbnail</p>
-            <label htmlFor="thumbnailImage" className="flex items-center gap-3">
-              <img
-                src={assets.file_upload_icon}
-                alt=""
-                className="p-3 bg-blue-500 rounded "
-              />
+          <div className="flex flex-col gap-2">
+            <label className="text-sm text-white/70">Course Thumbnail</label>
+            <label
+              htmlFor="thumbnailImage"
+              className="glass-input border border-white/15 rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer hover:border-white/40 transition"
+            >
+              <i className="ri-upload-cloud-2-line text-2xl text-white/80"></i>
+              <div className="flex-1">
+                <p className="text-sm text-white/70">
+                  {image ? image.name : "Upload an image"}
+                </p>
+                <p className="text-xs text-white/40">JPG or PNG</p>
+              </div>
               <input
                 type="file"
                 id="thumbnailImage"
@@ -197,121 +238,200 @@ const AddCourse = () => {
                 accept="image/*"
                 hidden
               />
-              <img
-                src={image ? URL.createObjectURL(image) : ""}
-                alt=""
-                className="max-h-10"
-              />
+              {image && (
+                <img
+                  src={URL.createObjectURL(image)}
+                  alt="preview"
+                  className="w-10 h-10 rounded-lg object-cover border border-white/20"
+                />
+              )}
             </label>
           </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <p>Discount %</p>
-          <input
-            onChange={(e) => setDiscount(e.target.value)}
-            value={discount}
-            type="number"
-            placeholder="0"
-            min={0}
-            max={100}
-            className="outline-none md:py-2.5 py-2 w-28 px-3 rounded border border-gray-500"
-            required
-          />
+        <div className="flex flex-col gap-2">
+          <label className="text-sm text-white/70">Course Description</label>
+          <div
+            ref={editorRef}
+            className="glass-input border border-white/15 rounded-2xl px-3 py-2 text-white"
+          ></div>
         </div>
 
-        {/*adding chapter & lecturer*/}
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="flex flex-col gap-2">
+            <label className="text-sm text-white/70">Price</label>
+            <input
+              onChange={(e) => setCoursePrice(e.target.value)}
+              value={coursePrice}
+              type="number"
+              placeholder="0"
+              className="glass-input border border-white/15 rounded-2xl px-4 py-3 text-white placeholder:text-white/50 focus:outline-none"
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-sm text-white/70">Discount %</label>
+            <input
+              onChange={(e) => setDiscount(e.target.value)}
+              value={discount}
+              type="number"
+              placeholder="0"
+              min={0}
+              max={100}
+              className="glass-input border border-white/15 rounded-2xl px-4 py-3 text-white placeholder:text-white/50 focus:outline-none"
+              required
+            />
+          </div>
+        </div>
 
-        <div>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Chapters</h3>
+            <button
+              type="button"
+              className="glass-button border border-white/20 rounded-full px-4 py-2 text-sm text-white"
+              onClick={() => handleChapter("add")}
+            >
+              + Add Chapter
+            </button>
+          </div>
           {chapters.map((chapter, chapterIndex) => (
-            <div key={chapterIndex} className="bg-white border rounded-lg mb-4">
-              <div className="flex justify-between items-center p-4 border-b">
-                <div className="flex items-center">
-                  <img
+            <div
+              key={chapter.chapterId}
+              className="glass-card border border-white/10 rounded-2xl mb-4"
+            >
+              <div className="flex justify-between items-center p-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
                     onClick={() => handleChapter("toggle", chapter.chapterId)}
-                    src={assets.dropdown_icon}
-                    width={14}
-                    alt=""
-                    className={`mr-2 coursor-pointer transition-all ${
-                      chapter.collapsed && "-rotate-90"
+                    className={`w-8 h-8 rounded-full bg-white/10 flex items-center justify-center transition ${
+                      chapter.collapsed ? "-rotate-90" : ""
                     }`}
-                  />
-                  <span className="font-semibold">
-                    {chapterIndex + 1}
-                    {chapter.chapterTitle}
-                  </span>
+                  >
+                    <i className="ri-arrow-down-s-line text-lg"></i>
+                  </button>
+                  <div>
+                    <p className="font-semibold">{chapter.chapterTitle}</p>
+                    <span className="text-xs text-white/60">
+                      {chapter.chapterContent.length} Lectures
+                    </span>
+                  </div>
                 </div>
-                <span className="text-gray-500">
-                  {chapter.chapterContent.length} Lectures
-                </span>
-                <img
+                <button
+                  type="button"
                   onClick={() => handleChapter("remove", chapter.chapterId)}
-                  src={assets.cross_icon}
-                  alt=""
-                  className="cursor-pointer"
-                />
+                  className="text-white/60 hover:text-red-400"
+                >
+                  <i className="ri-close-line text-xl"></i>
+                </button>
               </div>
               {!chapter.collapsed && (
-                <div className="p-4">
-                  {chapter.chapterContent.map((lecture, lectureIndex) => (
-                    <div
-                      key={lectureIndex}
-                      className="flex justify-between items-center mb-2"
-                    >
-                      <span>
-                        {lectureIndex + 1}
-                        {lecture.lectureTitle} - {lecture.lectureDuration} mins
-                        -{" "}
-                        <a
-                          href={lecture.lectureUrl}
-                          target="_blank"
-                          className="text-blue-500"
+                <div className="p-4 space-y-4">
+                  <div className="space-y-2">
+                    {chapter.chapterContent.map((lecture, lectureIndex) => (
+                      <div
+                        key={lecture.lectureId}
+                        className="flex justify-between items-center py-2 text-sm text-white/80 border-b border-white/10 last:border-b-0"
+                      >
+                        <div>
+                          <p className="font-medium">{lecture.lectureTitle}</p>
+                          <p className="text-white/60">
+                            {lecture.lectureDuration} mins ·{" "}
+                            <a
+                              href={lecture.lectureUrl}
+                              target="_blank"
+                              className="text-blue-300 underline"
+                            >
+                              Link
+                            </a>{" "}
+                            · {lecture.isPreviewFree ? "Free Preview" : "Paid"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="text-white/60 hover:text-red-400"
+                          onClick={() =>
+                            handleLecture("remove", chapter.chapterId, lectureIndex)
+                          }
                         >
-                          Link
-                        </a>{" "}
-                        - {lecture.isPreviewFree ? "Free Preview" : "Paid"}
-                      </span>
-                      <img
-                        src={assets.cross_icon}
-                        alt=""
-                        className="cursor-pointer"
-                        onClick={() =>
-                          handleLecture(
-                            "remove",
-                            chapter.chapterId,
-                            lectureIndex
-                          )
-                        }
-                      />
+                          <i className="ri-delete-bin-line text-lg"></i>
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="glass-button border border-white/20 rounded-full px-4 py-2 text-sm mt-3"
+                      onClick={() => handleLecture("add", chapter.chapterId)}
+                    >
+                      + Add Lecture
+                    </button>
+                  </div>
+                  <div className="border-t border-white/10 pt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-white">Quizzes</p>
+                      <button
+                        type="button"
+                        className="text-xs glass-button border border-white/20 rounded-full px-3 py-1"
+                        onClick={() => handleQuiz("add", chapter.chapterId)}
+                      >
+                        + Add Quiz
+                      </button>
                     </div>
-                  ))}
-                  <div
-                    className="inline-flex bg-gray-100 p-2 rounded cursor-pointer mt-2"
-                    onClick={() => handleLecture("add", chapter.chapterId)}
-                  >
-                    + Add Lecture
+                    {(chapter.quizzes || []).length === 0 && (
+                      <p className="text-xs text-white/50">
+                        No quizzes added yet.
+                      </p>
+                    )}
+                    {(chapter.quizzes || []).map((quiz, quizIndex) => (
+                      <div
+                        key={quiz.quizId || quizIndex}
+                        className="space-y-2 py-2 text-sm text-white/80 border-b border-white/10 last:border-b-0"
+                      >
+                        <div className="flex justify-between items-center">
+                          <p className="font-medium">{quiz.question}</p>
+                          <button
+                            type="button"
+                            className="text-white/60 hover:text-red-400"
+                            onClick={() =>
+                              handleQuiz("remove", chapter.chapterId, quizIndex)
+                            }
+                          >
+                            <i className="ri-delete-bin-line text-lg"></i>
+                          </button>
+                        </div>
+                        <div className="space-y-1 pl-2">
+                          {quiz.options?.map((option, idx) => (
+                            <div
+                              key={idx}
+                              className={`text-xs ${
+                                idx === quiz.correctIndex
+                                  ? "text-green-300"
+                                  : "text-white/60"
+                              }`}
+                            >
+                              {idx + 1}. {option}
+                              {idx === quiz.correctIndex && " (Correct)"}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
             </div>
           ))}
-          <div
-            className="flex justify-between items-center bg-blue-100 p-2 rounded cursor-pointer"
-            onClick={() => handleChapter("add")}
-          >
-            + Add Chapter
-          </div>
 
           {showPopup && (
-            <div className="fixed inset-0 flex items-center justify-center bg-gray-500 bg-opacity-50">
-              <div className="bg-white text-gray-700 p-4 rounded relative w-full max-w-80">
+            <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur">
+              <div className="glass-card border border-white/10 rounded-3xl p-6 w-full max-w-md relative text-white">
                 <h2 className="text-lg font-semibold mb-4">Add Lecture</h2>
-
                 <div className="mb-2">
-                  <p>Lecture Title</p>
+                  <p className="text-sm text-white/70">Lecture Title</p>
                   <input
                     type="text"
-                    className="mt-1 block w-full border rounded py-1 px-2"
+                    className="mt-1 block w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
                     value={lectureDetails.lectureTitle}
                     onChange={(e) =>
                       setLectureDetails({
@@ -321,12 +441,11 @@ const AddCourse = () => {
                     }
                   />
                 </div>
-
                 <div className="mb-2">
-                  <p>Duration (minutes)</p>
+                  <p className="text-sm text-white/70">Duration (minutes)</p>
                   <input
                     type="number"
-                    className="mt-1 block w-full border rounded py-1 px-2"
+                    className="mt-1 block w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
                     value={lectureDetails.lectureDuration}
                     onChange={(e) =>
                       setLectureDetails({
@@ -336,12 +455,11 @@ const AddCourse = () => {
                     }
                   />
                 </div>
-
                 <div className="mb-2">
-                  <p>Lecture URL</p>
+                  <p className="text-sm text-white/70">Lecture URL</p>
                   <input
                     type="text"
-                    className="mt-1 block w-full border rounded py-1 px-2"
+                    className="mt-1 block w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
                     value={lectureDetails.lectureUrl}
                     onChange={(e) =>
                       setLectureDetails({
@@ -351,43 +469,104 @@ const AddCourse = () => {
                     }
                   />
                 </div>
-
-                <div className="flex gap-2 my-4">
-                  <p>Is Preview Free?</p>
+                <label className="flex items-center gap-2 text-sm text-white/70 my-3">
                   <input
                     type="checkbox"
-                    className="mt-1 scale-125"
-                    value={lectureDetails.isPreviewFree}
+                    className="scale-125 accent-blue-400"
+                    checked={lectureDetails.isPreviewFree}
                     onChange={(e) =>
                       setLectureDetails({
                         ...lectureDetails,
-                        isPreviewFree: e.target.value,
+                        isPreviewFree: e.target.checked,
                       })
                     }
                   />
-                </div>
+                  Free Preview
+                </label>
                 <button
                   onClick={addLecture}
                   type="button"
-                  className="w-full bg-blue-400 text-white px-4 py-2 rounded"
+                  className="w-full glass-button border border-white/20 rounded-full py-3 mt-4 text-sm"
                 >
                   Add
                 </button>
-                <img
+                <button
                   onClick={() => setShowPopup(false)}
-                  src={assets.cross_icon}
-                  className="absolute top-4 right-4 w-4 cursor-pointer"
-                  alt=""
-                />
+                  className="absolute top-4 right-4 text-white/60 hover:text-white"
+                >
+                  <i className="ri-close-line text-2xl"></i>
+                </button>
+              </div>
+            </div>
+          )}
+          {showQuizPopup && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur">
+              <div className="glass-card border border-white/10 rounded-3xl p-6 w-full max-w-md relative text-white">
+                <h2 className="text-lg font-semibold mb-4">Add Quiz</h2>
+                <div className="mb-2">
+                  <p className="text-sm text-white/70">Question</p>
+                  <input
+                    type="text"
+                    className="mt-1 block w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
+                    value={quizDetails.question}
+                    onChange={(e) =>
+                      setQuizDetails({ ...quizDetails, question: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm text-white/70">Options</p>
+                  {quizDetails.options.map((option, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name="correctOption"
+                        checked={quizDetails.correctIndex === idx}
+                        onChange={() =>
+                          setQuizDetails({ ...quizDetails, correctIndex: idx })
+                        }
+                        className="accent-blue-400"
+                      />
+                      <input
+                        type="text"
+                        className="flex-1 glass-input border border-white/20 rounded-2xl py-2 px-3"
+                        placeholder={`Option ${idx + 1}`}
+                        value={option}
+                        onChange={(e) =>
+                          setQuizDetails({
+                            ...quizDetails,
+                            options: quizDetails.options.map((opt, i) =>
+                              i === idx ? e.target.value : opt
+                            ),
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addQuiz}
+                  type="button"
+                  className="w-full glass-button border border-white/20 rounded-full py-3 mt-4 text-sm"
+                >
+                  Add Quiz
+                </button>
+                <button
+                  onClick={() => setShowQuizPopup(false)}
+                  className="absolute top-4 right-4 text-white/60 hover:text-white"
+                >
+                  <i className="ri-close-line text-2xl"></i>
+                </button>
               </div>
             </div>
           )}
         </div>
+
         <button
           type="submit"
-          className="bg-black text-white w-max py-2.5 px-8 rounded my-4"
+          className="self-center glass-button border border-white/20 rounded-full px-10 py-3 text-sm font-semibold text-white hover:scale-[1.02]"
         >
-          Add
+          Publish Course
         </button>
       </form>
     </div>
