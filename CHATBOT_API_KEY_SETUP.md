@@ -4,12 +4,12 @@
 
 **Seeing this error?** Here's what it means:
 
-| Error Message | Cause | Quick Fix |
-|---------------|-------|-----------|
-| "Failed to send message" | Wrong API key or quota exceeded | Check `.env` file, verify API key |
-| "No available Gemini model found" | All models failed to load | Verify API key at https://aistudio.google.com/app/apikey |
-| "Quota exceeded" / 429 error | Free tier limit reached | Wait 1 minute and try again |
-| "API key is not configured" | Missing `GEMINI_API_KEY` in `.env` | Add API key to `server/.env` |
+| Error Message                     | Cause                              | Quick Fix                                                |
+| --------------------------------- | ---------------------------------- | -------------------------------------------------------- |
+| "Failed to send message"          | Wrong API key or quota exceeded    | Check `.env` file, verify API key                        |
+| "No available Gemini model found" | All models failed to load          | Verify API key at https://aistudio.google.com/app/apikey |
+| "Quota exceeded" / 429 error      | Free tier limit reached            | Wait 1 minute and try again                              |
+| "API key is not configured"       | Missing `GEMINI_API_KEY` in `.env` | Add API key to `server/.env`                             |
 
 ## Problem
 
@@ -136,11 +136,13 @@ This means the chatbot can't find a working AI model. **SOLUTION:**
 ### Error: "Failed to send message. Please try again."
 
 This is usually one of these issues:
+
 1. **Wrong API Key**: Double-check your `GEMINI_API_KEY` in `.env`
 2. **Quota Exceeded**: Wait and try again
 3. **Model Not Available**: The server logs will show which models failed
 
 **How to fix:**
+
 ```bash
 # 1. Check server logs for detailed error
 # 2. Verify .env file has correct API key

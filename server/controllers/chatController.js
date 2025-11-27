@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import axios from 'axios';
 
 const apiKey = process.env.GEMINI_API_KEY;
+const GEMINI_V1_API_BASE = 'https://generativelanguage.googleapis.com/v1';
 const modelFromEnv = process.env.GEMINI_MODEL?.split(",").map((m) => m.trim()).filter(Boolean);
 
 if (!apiKey) {
@@ -8,6 +10,24 @@ if (!apiKey) {
 }
 
 let cachedModel = null;
+
+// Helper function to call Gemini v1 API directly (bypasses SDK's v1beta limitation)
+const callGeminiV1API = async (modelName, prompt) => {
+  const url = `${GEMINI_V1_API_BASE}/${modelName}:generateContent?key=${apiKey}`;
+  
+  const response = await axios.post(url, {
+    contents: [{
+      parts: [{ text: prompt }]
+    }]
+  }, {
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    timeout: 30000
+  });
+
+  return response.data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+};
 
 // Function to get available model
 const getAvailableModel = async () => {
@@ -23,34 +43,74 @@ const getAvailableModel = async () => {
 
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    // Fallback to common model names - PRIORITIZE FLASH MODELS FOR SPEED
-    // Note: Use the actual model names without 'models/' prefix
+    // First, try to list available models from the API
+    try {
+      console.log("Fetching available models from API...");
+      const { models } = await genAI.listModels();
+      if (models && models.length > 0) {
+        console.log("✓ Available models from your API:");
+        models.forEach(m => {
+          if (m.supportedGenerationMethods?.includes('generateContent')) {
+            console.log(`  - ${m.name} (${m.displayName || 'no display name'})`);
+          }
+        });
+        
+        // Try to find a flash model first
+        const flashModel = models.find(m => 
+          m.name.includes('flash') && 
+          m.supportedGenerationMethods?.includes('generateContent')
+        );
+        
+        if (flashModel) {
+          const modelName = flashModel.name;
+          console.log(`✓ Using fast model: ${modelName}`);
+          cachedModel = modelName;
+          return modelName;
+        }
+        
+        // Otherwise use first available
+        const firstModel = models.find(m => 
+          m.supportedGenerationMethods?.includes('generateContent')
+        );
+        
+        if (firstModel) {
+          const modelName = firstModel.name;
+          console.log(`✓ Using model: ${modelName}`);
+          cachedModel = modelName;
+          return modelName;
+        }
+      }
+    } catch (listError) {
+      console.log("Could not list models from API, trying fallback models...");
+      console.log("Error:", listError.message.split('\n')[0]);
+    }
+
+    // Use actual available models from v1 API
     const fallbackModels =
       modelFromEnv && modelFromEnv.length > 0
         ? modelFromEnv
         : [
-            "gemini-1.5-flash",           // FASTEST - Free tier friendly
-            "gemini-1.5-pro",             // More capable, still available
-            "gemini-pro",                 // Legacy fallback
-            "gemini-1.0-pro",             // Older version
+            "models/gemini-2.5-flash",       // ✓ FASTEST - Confirmed working
+            "models/gemini-2.5-pro",         // ✓ More capable
+            "models/gemini-2.0-flash",       // ✓ Alternative fast model
+            "models/gemini-2.0-flash-001",   // ✓ Specific version
           ];
     
-    console.log("Testing models:", fallbackModels);
+    console.log("Testing models with different API versions...");
     
     for (const modelName of fallbackModels) {
       try {
         console.log(`Testing model: ${modelName}...`);
-        const model = genAI.getGenerativeModel({ model: modelName });
-        // Test if model works by making a simple call
-        const result = await model.generateContent("Hi");
-        const response = await result.response;
-        response.text(); // Just verify it works
+        // Test with direct v1 API call
+        const text = await callGeminiV1API(modelName, "Hi");
         
         console.log(`✓ Model ${modelName} is available and working!`);
+        console.log(`✓ Test response: ${text.substring(0, 50)}...`);
         cachedModel = modelName;
         return modelName;
       } catch (testError) {
-        console.log(`✗ Model ${modelName} not available: ${testError.message.split('\n')[0]}`);
+        const errorMsg = testError.response?.data?.error?.message || testError.message;
+        console.log(`✗ Model ${modelName} not available: ${errorMsg.split('\n')[0]}`);
         continue;
       }
     }
@@ -82,16 +142,6 @@ export const chat = async (req, res) => {
 
     const modelName = await getAvailableModel();
     console.log(`Using model: ${modelName}`);
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ 
-      model: modelName,
-      generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 1000,
-        topP: 0.95,
-        topK: 40,
-      },
-    });
 
     // Build conversation context - SIMPLIFIED
     let prompt = `You are a helpful learning assistant. Keep responses concise and friendly.\n\nUser: ${message}\nAssistant:`;
@@ -106,16 +156,8 @@ export const chat = async (req, res) => {
     }
 
     try {
-      const result = await model.generateContent({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }],
-          },
-        ],
-      });
-      const response = await result.response;
-      const text = response.text();
+      // Use direct v1 API call (bypasses SDK's v1beta limitation)
+      const text = await callGeminiV1API(modelName, prompt);
 
       return res.json({
         success: true,
@@ -125,18 +167,19 @@ export const chat = async (req, res) => {
       console.error("Model generation error:", error.message);
       
       // If model fails, clear cache and let user try again
-      if (error.message.includes("not found") || error.message.includes("404")) {
+      if (error.response?.status === 404 || error.message.includes("404")) {
         console.log("Model not found, clearing cache...");
         cachedModel = null;
+        throw new Error(`Model ${modelName} not found. Please try again.`);
       }
       
       // Check if it's a quota error
-      if (error.message && error.message.includes("Quota exceeded")) {
+      if (error.response?.status === 429 || error.message.includes("Quota exceeded") || error.message.includes("429")) {
         throw new Error("API quota exceeded. Please wait a moment and try again.");
       }
 
       // For other errors, throw with clearer message
-      throw error;
+      throw new Error(error.response?.data?.error?.message || error.message || "Failed to generate response");
     }
   } catch (error) {
     console.error("Chat error:", error);
