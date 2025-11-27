@@ -48,10 +48,13 @@ const Chatbot = () => {
         backendUrl + "/api/chat/chat",
         {
           message: userMessage,
-          conversationHistory: messages.slice(-10), // Last 10 messages for context
+          conversationHistory: messages.slice(-4), // Last 4 messages for context (faster)
         },
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { 
+            Authorization: `Bearer ${token}`,
+          },
+          timeout: 30000, // 30 second timeout
         }
       );
 
@@ -149,10 +152,13 @@ const Chatbot = () => {
         {isLoading && (
           <div className="flex justify-start">
             <div className="glass-light px-4 py-3 rounded-2xl border border-white/20 shadow-md">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-white/80 rounded-full animate-bounce"></span>
-                <span className="w-2 h-2 bg-white/80 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></span>
-                <span className="w-2 h-2 bg-white/80 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+              <div className="flex items-center gap-3">
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span>
+                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></span>
+                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                </div>
+                <span className="text-xs text-white/70">AI is thinking...</span>
               </div>
             </div>
           </div>

@@ -12,6 +12,7 @@ let cachedModel = null;
 // Function to get available model
 const getAvailableModel = async () => {
   if (cachedModel) {
+    console.log(`Using cached model: ${cachedModel}`);
     return cachedModel;
   }
 
@@ -22,72 +23,41 @@ const getAvailableModel = async () => {
 
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    // Try to list available models
-    try {
-      const models = await genAI.listModels();
-      const modelList = models.data || [];
-      
-      // Look for Flash models first (better quota limits)
-      const flashModel = modelList.find(
-        (m) => m.name && m.name.includes("flash") && m.supportedGenerationMethods?.includes("generateContent")
-      );
-      
-      if (flashModel) {
-        cachedModel = flashModel.name.split("/").pop();
-        return cachedModel;
-      }
-
-      // Fallback to any model that supports generateContent
-      const availableModel = modelList.find(
-        (m) => m.supportedGenerationMethods?.includes("generateContent")
-      );
-      
-      if (availableModel) {
-        cachedModel = availableModel.name.split("/").pop();
-        return cachedModel;
-      }
-    } catch (listError) {
-      console.log("Could not list models, using fallback:", listError.message);
-    }
-
-    // Fallback to common model names
+    // Fallback to common model names - PRIORITIZE FLASH MODELS FOR SPEED
+    // Note: Use the actual model names without 'models/' prefix
     const fallbackModels =
       modelFromEnv && modelFromEnv.length > 0
         ? modelFromEnv
         : [
-            "models/gemini-2.5-pro",
-            "models/gemini-2.5-pro-preview-06-05",
-            "models/gemini-2.5-pro-preview-05-06",
-            "models/gemini-2.5-pro-preview-03-25",
-            "models/gemini-2.5-flash",
-            "models/gemini-2.0-flash",
-            "models/gemini-2.0-flash-001",
-            "models/gemini-pro-latest",
+            "gemini-1.5-flash",           // FASTEST - Free tier friendly
+            "gemini-1.5-pro",             // More capable, still available
+            "gemini-pro",                 // Legacy fallback
+            "gemini-1.0-pro",             // Older version
           ];
+    
+    console.log("Testing models:", fallbackModels);
     
     for (const modelName of fallbackModels) {
       try {
+        console.log(`Testing model: ${modelName}...`);
         const model = genAI.getGenerativeModel({ model: modelName });
-        // Test if model works by making a simple call with the new API format
-        await model.generateContent({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: "availability check" }],
-            },
-          ],
-        });
+        // Test if model works by making a simple call
+        const result = await model.generateContent("Hi");
+        const response = await result.response;
+        response.text(); // Just verify it works
+        
+        console.log(`✓ Model ${modelName} is available and working!`);
         cachedModel = modelName;
         return modelName;
       } catch (testError) {
-        console.log(`Model ${modelName} not available: ${testError.message}`);
+        console.log(`✗ Model ${modelName} not available: ${testError.message.split('\n')[0]}`);
         continue;
       }
     }
 
-    throw new Error("No available Gemini model found");
+    throw new Error("No available Gemini model found. Please check your API key and quota at https://ai.google.dev/gemini-api/docs/rate-limits");
   } catch (error) {
-    console.error("Error getting available model:", error);
+    console.error("Error getting available model:", error.message);
     throw error;
   }
 };
@@ -111,56 +81,63 @@ export const chat = async (req, res) => {
     }
 
     const modelName = await getAvailableModel();
+    console.log(`Using model: ${modelName}`);
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: modelName, apiVersion: "v1beta" });
+    const model = genAI.getGenerativeModel({ 
+      model: modelName,
+      generationConfig: {
+        temperature: 0.9,
+        maxOutputTokens: 1000,
+        topP: 0.95,
+        topK: 40,
+      },
+    });
 
-    // Build conversation context
-    let prompt = message;
+    // Build conversation context - SIMPLIFIED
+    let prompt = `You are a helpful learning assistant. Keep responses concise and friendly.\n\nUser: ${message}\nAssistant:`;
+    
     if (conversationHistory.length > 0) {
-      const historyText = conversationHistory
+      // Only include last 2 exchanges for context
+      const recentHistory = conversationHistory.slice(-4);
+      const historyText = recentHistory
         .map((msg) => `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`)
         .join("\n");
-      prompt = `Previous conversation:\n${historyText}\n\nUser: ${message}\nAssistant:`;
+      prompt = `You are a helpful learning assistant. Keep responses concise and friendly.\n\nRecent context:\n${historyText}\n\nUser: ${message}\nAssistant:`;
     }
 
-    let retries = 3;
-    let lastError = null;
+    try {
+      const result = await model.generateContent({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+      });
+      const response = await result.response;
+      const text = response.text();
 
-    while (retries > 0) {
-      try {
-        const result = await model.generateContent({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: prompt }],
-            },
-          ],
-        });
-        const response = await result.response;
-        const text = response.text();
-
-        return res.json({
-          success: true,
-          message: text,
-        });
-      } catch (error) {
-        lastError = error;
-        
-        // Check if it's a quota error
-        if (error.message && error.message.includes("Quota exceeded")) {
-          const retryDelay = error.retryDelay || Math.pow(2, 4 - retries) * 1000;
-          console.log(`Quota exceeded, retrying in ${retryDelay}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          retries--;
-          continue;
-        }
-
-        // For other errors, throw immediately
-        throw error;
+      return res.json({
+        success: true,
+        message: text,
+      });
+    } catch (error) {
+      console.error("Model generation error:", error.message);
+      
+      // If model fails, clear cache and let user try again
+      if (error.message.includes("not found") || error.message.includes("404")) {
+        console.log("Model not found, clearing cache...");
+        cachedModel = null;
       }
-    }
+      
+      // Check if it's a quota error
+      if (error.message && error.message.includes("Quota exceeded")) {
+        throw new Error("API quota exceeded. Please wait a moment and try again.");
+      }
 
-    throw lastError || new Error("Failed to generate response after retries");
+      // For other errors, throw with clearer message
+      throw error;
+    }
   } catch (error) {
     console.error("Chat error:", error);
     
