@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppContext } from "../../context/AppContext";
+import { useUser } from "@clerk/clerk-react";
 import axios from "axios";
 import { toast } from "react-toastify";
 import Navbar from "../../components/student/Navbar";
@@ -8,6 +9,7 @@ import Footer from "../../components/student/Footer";
 
 const Forum = () => {
   const { backendUrl, getToken } = useContext(AppContext);
+  const { user } = useUser();
   const navigate = useNavigate();
   const [posts, setPosts] = useState([]);
   const [filteredPosts, setFilteredPosts] = useState([]);
@@ -15,7 +17,14 @@ const Forum = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const categories = ["All", "General", "Questions", "Announcements", "Help", "Feedback"];
+  const categories = [
+    "All",
+    "General",
+    "Questions",
+    "Announcements",
+    "Help",
+    "Feedback",
+  ];
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -44,7 +53,9 @@ const Forum = () => {
     try {
       setLoading(true);
       const { data } = await axios.get(
-        `${backendUrl}/api/forum/posts${selectedCategory !== "All" ? `?category=${selectedCategory}` : ""}`
+        `${backendUrl}/api/forum/posts${
+          selectedCategory !== "All" ? `?category=${selectedCategory}` : ""
+        }`
       );
 
       if (data.success) {
@@ -69,9 +80,43 @@ const Forum = () => {
         post.title.toLowerCase().includes(query) ||
         post.content.toLowerCase().includes(query) ||
         post.author.name.toLowerCase().includes(query) ||
-        (post.tags && post.tags.some(tag => tag.toLowerCase().includes(query)))
+        (post.tags &&
+          post.tags.some((tag) => tag.toLowerCase().includes(query)))
     );
     setFilteredPosts(filtered);
+  };
+
+  const handleDeletePost = async (e, postId) => {
+    e.stopPropagation(); // Prevent card click event
+
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this post? This action cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      const { data } = await axios.post(
+        `${backendUrl}/api/forum/delete-post`,
+        { postId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (data.success) {
+        toast.success("Post deleted successfully");
+        // Remove post from local state
+        setPosts(posts.filter((post) => post._id !== postId));
+        setFilteredPosts(filteredPosts.filter((post) => post._id !== postId));
+      } else {
+        toast.error(data.message || "Failed to delete post");
+      }
+    } catch (error) {
+      console.error("Error deleting post:", error);
+      toast.error(error.response?.data?.message || "Failed to delete post");
+    }
   };
 
   return (
@@ -80,7 +125,9 @@ const Forum = () => {
         <div className="max-w-7xl mx-auto">
           <div className="mb-8 text-center">
             <h1 className="h1 text-white mb-3">Community Forum</h1>
-            <p className="body-large text-white/80">Connect with learners and share knowledge</p>
+            <p className="body-large text-white/80">
+              Connect with learners and share knowledge
+            </p>
           </div>
 
           {/* Search Bar */}
@@ -116,8 +163,8 @@ const Forum = () => {
                     onClick={() => setSelectedCategory(cat)}
                     className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
                       selectedCategory === cat
-                        ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg'
-                        : 'bg-white/5 text-white/80 hover:text-white hover:bg-white/10'
+                        ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg"
+                        : "bg-white/5 text-white/80 hover:text-white hover:bg-white/10"
                     }`}
                   >
                     {cat}
@@ -137,7 +184,9 @@ const Forum = () => {
           {/* Results Count */}
           {searchQuery && (
             <div className="mb-4 text-white/70 body-small">
-              Found {filteredPosts.length} {filteredPosts.length === 1 ? 'post' : 'posts'} matching "{searchQuery}"
+              Found {filteredPosts.length}{" "}
+              {filteredPosts.length === 1 ? "post" : "posts"} matching "
+              {searchQuery}"
             </div>
           )}
 
@@ -150,7 +199,7 @@ const Forum = () => {
             <div className="glass-card rounded-2xl p-12 text-center border border-white/20">
               <i className="ri-inbox-line text-6xl mb-4 text-white/40"></i>
               <p className="text-white/70 body-large mb-2">
-                {searchQuery ? 'No posts match your search' : 'No posts found'}
+                {searchQuery ? "No posts match your search" : "No posts found"}
               </p>
               {searchQuery && (
                 <button
@@ -164,10 +213,12 @@ const Forum = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredPosts.map((post) => {
-                const firstImage = post.media && post.media.length > 0
-                  ? post.media.find(m => m.type === 'image')
-                  : null;
-                const imageUrl = firstImage?.url || firstImage?.thumbnail || null;
+                const firstImage =
+                  post.media && post.media.length > 0
+                    ? post.media.find((m) => m.type === "image")
+                    : null;
+                const imageUrl =
+                  firstImage?.url || firstImage?.thumbnail || null;
 
                 return (
                   <div
@@ -182,7 +233,7 @@ const Forum = () => {
                           alt={post.title}
                           className="w-full h-full object-cover"
                           onError={(e) => {
-                            e.target.style.display = 'none';
+                            e.target.style.display = "none";
                           }}
                         />
                         <div className="absolute top-3 left-3">
@@ -218,7 +269,9 @@ const Forum = () => {
                         )}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-white text-sm truncate">{post.author.name}</span>
+                            <span className="font-semibold text-white text-sm truncate">
+                              {post.author.name}
+                            </span>
                             {!imageUrl && post.isPinned && (
                               <i className="ri-pushpin-fill text-yellow-400 text-xs"></i>
                             )}
@@ -245,8 +298,9 @@ const Forum = () => {
                       </h3>
 
                       <p className="text-white/70 text-sm line-clamp-3 mb-4 flex-1">
-                        {post.content.replace(/<[^>]*>/g, '').substring(0, 120)}
-                        {post.content.replace(/<[^>]*>/g, '').length > 120 && '...'}
+                        {post.content.replace(/<[^>]*>/g, "").substring(0, 120)}
+                        {post.content.replace(/<[^>]*>/g, "").length > 120 &&
+                          "..."}
                       </p>
 
                       {post.tags && post.tags.length > 0 && (
@@ -267,19 +321,42 @@ const Forum = () => {
                         </div>
                       )}
 
-                      <div className="flex items-center gap-4 text-sm text-white/60">
-                        <div className="flex items-center gap-1">
-                          <i className="ri-eye-line"></i>
-                          <span>{post.views}</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4 text-sm text-white/60">
+                          <div className="flex items-center gap-1">
+                            <i className="ri-eye-line"></i>
+                            <span>{post.views}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <i className="ri-heart-line"></i>
+                            <span>{post.likes.length}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <i className="ri-chat-3-line"></i>
+                            <span>{post.comments.length}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <i className="ri-heart-line"></i>
-                          <span>{post.likes.length}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <i className="ri-chat-3-line"></i>
-                          <span>{post.comments.length}</span>
-                        </div>
+                        {user && user.id === post.author.id && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/forum/post/${post._id}`);
+                              }}
+                              className="text-blue-400 hover:text-blue-300 transition-colors p-2 hover:bg-blue-500/10 rounded-lg"
+                              title="View and edit post"
+                            >
+                              <i className="ri-edit-line text-lg"></i>
+                            </button>
+                            <button
+                              onClick={(e) => handleDeletePost(e, post._id)}
+                              className="text-red-400 hover:text-red-300 transition-colors p-2 hover:bg-red-500/10 rounded-lg"
+                              title="Delete post"
+                            >
+                              <i className="ri-delete-bin-line text-lg"></i>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -295,4 +372,3 @@ const Forum = () => {
 };
 
 export default Forum;
-

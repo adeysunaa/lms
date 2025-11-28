@@ -7,34 +7,43 @@ const Footer = () => {
     <footer className="glass-card md:px-36 text-left w-full mt-10 backdrop-blur-xl border-t border-white/20">
       <div className="flex flex-col md:flex-row items-start px-8 md:px-0 justify-center gap-6 md:gap-16 py-6 border-b border-white/20">
         <div className="flex flex-col md:items-start items-center w-full">
-          <img src={assets.logo_dark} alt="logo" className="w-16 lg:w-20 brightness-0 invert" />
+          <img
+            src={assets.logo_dark}
+            alt="logo"
+            className="w-16 lg:w-20 brightness-0 invert"
+          />
           <p className="body-small mt-4 text-center md:text-left text-white/80">
-            Lorem ipsum dolor sit amet, consectetur adipisicing elit. Quisquam,
-            placeat sed vel distinctio, possimus tempora adipisci eos
-            aspernatur.
+            Empowering learners worldwide with high-quality online courses and
+            certifications.
           </p>
         </div>
         <div className="flex flex-col md:items-start items-center w-full">
           <h3 className="h6 text-white mb-3">Company</h3>
           <ul className="flex flex-col w-full justify-between caption text-white/80 md:space-y-1">
             <li>
-              <a href="#" className="hover:text-white transition-colors">Home</a>
+              <a href="#" className="hover:text-white transition-colors">
+                Home
+              </a>
             </li>
             <li>
-              <a href="#" className="hover:text-white transition-colors">About us</a>
+              <a href="#" className="hover:text-white transition-colors">
+                About us
+              </a>
             </li>
             <li>
-              <a href="#" className="hover:text-white transition-colors">Contact us</a>
+              <a href="#" className="hover:text-white transition-colors">
+                Contact us
+              </a>
             </li>
             <li>
-              <a href="#" className="hover:text-white transition-colors">Privacy policy</a>
+              <a href="#" className="hover:text-white transition-colors">
+                Privacy policy
+              </a>
             </li>
           </ul>
         </div>
         <div className="hidden md:flex flex-col items-start w-full">
-          <h3 className="h6 text-white mb-3">
-            Subscribe to our newsletter
-          </h3>
+          <h3 className="h6 text-white mb-3">Subscribe to our newsletter</h3>
           <p className="caption text-white/80 mb-3">
             The latest news, articles, and resources, sent to your inbox weekly.
           </p>

@@ -36,6 +36,12 @@ export const getCourseProgress = async (req, res) => {
           passed: false,
           bestScore: 0,
         })),
+        finalAssessment: chapter.finalAssessment ? {
+          passed: false,
+          score: 0,
+          attempts: [],
+          bestScore: 0,
+        } : null,
         completed: false,
       }));
 
@@ -103,8 +109,9 @@ export const completeLecture = async (req, res) => {
         chapter.completedAt = new Date();
       }
 
-      // Update overall progress
-      progress.overallProgress = calculateOverallProgress(progress);
+      // Update overall progress - need course data for final assessment calculation
+      const course = await Course.findById(courseId);
+      progress.overallProgress = calculateOverallProgress(progress, course);
       progress.lastAccessedAt = new Date();
 
       // Update current position
@@ -117,8 +124,11 @@ export const completeLecture = async (req, res) => {
 
       await progress.save();
 
-      // Check if course is completed
-      if (progress.overallProgress === 100 && !progress.certificateIssued) {
+      // Check if course is completed - must have 100% progress AND all final assessments passed
+      const allFinalAssessmentsPassed = areAllFinalAssessmentsPassed(progress, course);
+      if (progress.overallProgress === 100 && 
+          allFinalAssessmentsPassed && 
+          !progress.certificateIssued) {
         // Auto-issue certificate
         try {
           const certificateReq = {
@@ -132,6 +142,7 @@ export const completeLecture = async (req, res) => {
           };
           await issueCertificate(certificateReq, certificateRes);
           progress.completedAt = new Date();
+          progress.certificateIssued = true;
           await progress.save();
         } catch (certError) {
           console.error('Error issuing certificate:', certError);
@@ -266,12 +277,16 @@ export const submitQuiz = async (req, res) => {
       chapter.completedAt = new Date();
     }
 
-    progress.overallProgress = calculateOverallProgress(progress);
+    // Update overall progress - need course data for final assessment calculation
+    progress.overallProgress = calculateOverallProgress(progress, course);
     progress.lastAccessedAt = new Date();
     await progress.save();
 
-    // Check if course is completed after quiz submission
-    if (progress.overallProgress === 100 && !progress.certificateIssued) {
+    // Check if course is completed after quiz submission - must have 100% progress AND all final assessments passed
+    const allFinalAssessmentsPassed = areAllFinalAssessmentsPassed(progress, course);
+    if (progress.overallProgress === 100 && 
+        allFinalAssessmentsPassed && 
+        !progress.certificateIssued) {
       // Auto-issue certificate
       try {
         const certificateReq = {
@@ -343,11 +358,11 @@ function canAccessContent(progress, chapterIndex, contentIndex, contentType) {
 }
 
 // Calculate overall progress percentage
-function calculateOverallProgress(progress) {
+function calculateOverallProgress(progress, course) {
   let totalItems = 0;
   let completedItems = 0;
 
-  progress.chapters.forEach(chapter => {
+  progress.chapters.forEach((chapter, chapterIndex) => {
     // Count lectures
     totalItems += chapter.lectures.length;
     completedItems += chapter.lectures.filter(l => l.completed).length;
@@ -355,9 +370,38 @@ function calculateOverallProgress(progress) {
     // Count quizzes
     totalItems += chapter.quizzes.length;
     completedItems += chapter.quizzes.filter(q => q.passed).length;
+
+    // Count final assessments if they exist in the course
+    if (course && course.courseContent[chapterIndex]?.finalAssessment) {
+      totalItems += 1;
+      if (chapter.finalAssessment?.passed) {
+        completedItems += 1;
+      }
+    }
   });
 
   return totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+}
+
+// Helper function to check if all final assessments are passed
+function areAllFinalAssessmentsPassed(progress, course) {
+  if (!course || !progress) return true; // If no course data, allow (backwards compatibility)
+  
+  // Check each chapter for final assessments
+  for (let chapterIndex = 0; chapterIndex < progress.chapters.length; chapterIndex++) {
+    const chapterData = course.courseContent[chapterIndex];
+    const chapterProgress = progress.chapters[chapterIndex];
+    
+    // If course has a final assessment for this chapter
+    if (chapterData?.finalAssessment) {
+      // Progress must show it as passed
+      if (!chapterProgress?.finalAssessment?.passed) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
 }
 
 // Update time spent on lecture
@@ -380,6 +424,145 @@ export const updateTimeSpent = async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.json({ success: false, message: error.message });
+  }
+};
+
+// Submit final assessment
+export const submitFinalAssessment = async (req, res) => {
+  try {
+    const studentId = req.auth.userId;
+    const { courseId, chapterIndex, answers, score, passed } = req.body;
+
+    const progress = await CourseProgress.findOne({ studentId, courseId });
+    const course = await Course.findById(courseId);
+
+    if (!progress || !course) {
+      return res.json({
+        success: false,
+        message: 'Progress or course not found',
+      });
+    }
+
+    const chapter = progress.chapters[chapterIndex];
+    const chapterData = course.courseContent[chapterIndex];
+
+    if (!chapter || !chapterData || !chapterData.finalAssessment) {
+      return res.json({
+        success: false,
+        message: 'Final assessment not found for this chapter',
+      });
+    }
+
+    // Verify all lectures and quizzes are completed
+    const allLecturesCompleted = chapter.lectures.every(l => l.completed);
+    const allQuizzesPassed = !chapterData.quizzes || chapterData.quizzes.length === 0 || 
+      chapter.quizzes.every(q => q.passed);
+
+    if (!allLecturesCompleted || !allQuizzesPassed) {
+      return res.json({
+        success: false,
+        message: 'Please complete all lectures and pass all quizzes before taking the final assessment',
+      });
+    }
+
+    // Initialize final assessment progress if it doesn't exist
+    if (!chapter.finalAssessment) {
+      chapter.finalAssessment = {
+        passed: false,
+        score: 0,
+        attempts: [],
+        bestScore: 0,
+      };
+    }
+
+    // Calculate answer details
+    const answerDetails = answers.map((answer, index) => {
+      const question = chapterData.finalAssessment.questions[index];
+      const isCorrect = question && answer === question.correctAnswer;
+      
+      return {
+        questionId: question?.quizId || `question-${index}`,
+        selectedAnswer: answer,
+        isCorrect: isCorrect || false,
+      };
+    });
+
+    // Save attempt
+    chapter.finalAssessment.attempts.push({
+      score,
+      correctAnswers: answerDetails.filter(a => a.isCorrect).length,
+      totalQuestions: answers.length,
+      answers: answerDetails,
+      attemptedAt: new Date(),
+    });
+
+    // Update best score
+    chapter.finalAssessment.bestScore = Math.max(chapter.finalAssessment.bestScore, score);
+
+    // Check if passed
+    const passingScore = chapterData.finalAssessment.passingScore || 70;
+    const actuallyPassed = score >= passingScore;
+
+    if (actuallyPassed) {
+      chapter.finalAssessment.passed = true;
+      chapter.finalAssessment.completedAt = new Date();
+    }
+
+    // Check if chapter is now complete (all lectures, quizzes, and final assessment passed)
+    if (allLecturesCompleted && allQuizzesPassed && chapter.finalAssessment.passed) {
+      chapter.completed = true;
+      chapter.completedAt = new Date();
+    }
+
+    // Update overall progress
+    progress.overallProgress = calculateOverallProgress(progress, course);
+    progress.lastAccessedAt = new Date();
+    await progress.save();
+
+    // Check if course is completed - must have 100% progress AND all final assessments passed
+    const allFinalAssessmentsPassed = areAllFinalAssessmentsPassed(progress, course);
+    const courseCompleted = progress.overallProgress === 100 && 
+                           allFinalAssessmentsPassed && 
+                           !progress.certificateIssued &&
+                           actuallyPassed; // This assessment must be passed
+
+    if (courseCompleted) {
+      try {
+        const certificateReq = {
+          body: { courseId, studentId },
+          auth: { userId: studentId },
+        };
+        const certificateRes = {
+          json: (data) => {
+            console.log('Certificate issued after final assessment:', data);
+          },
+        };
+        await issueCertificate(certificateReq, certificateRes);
+        progress.completedAt = new Date();
+        progress.certificateIssued = true;
+        await progress.save();
+      } catch (certError) {
+        console.error('Error issuing certificate after final assessment:', certError);
+      }
+    }
+
+    const correctAnswers = answerDetails.filter(a => a.isCorrect).length;
+
+    res.json({
+      success: true,
+      score,
+      passed: actuallyPassed,
+      correctAnswers,
+      totalQuestions: answers.length,
+      progress,
+      courseCompleted: progress.overallProgress === 100,
+    });
+  } catch (error) {
+    console.error('Error submitting final assessment:', error);
+    res.json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 

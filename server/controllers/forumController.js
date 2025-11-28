@@ -456,3 +456,161 @@ export const deleteReply = async (req, res) => {
   }
 };
 
+export const updatePost = async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+    const { postId } = req.body;
+    const { title, content, category, tags } = req.body;
+    const mediaFiles = req.files || [];
+
+    if (!postId) {
+      return res.json({
+        success: false,
+        message: "Post ID is required",
+      });
+    }
+
+    const post = await ForumPost.findById(postId);
+
+    if (!post) {
+      return res.json({
+        success: false,
+        message: "Post not found",
+      });
+    }
+
+    // Check if user is the author
+    if (post.author.id.toString() !== userId) {
+      return res.json({
+        success: false,
+        message: "Unauthorized: Only the author can edit their post",
+      });
+    }
+
+    // Upload new media files to Cloudinary
+    const newMedia = [];
+    for (const file of mediaFiles) {
+      try {
+        const result = await cloudinary.uploader.upload(file.path, {
+          resource_type: file.mimetype.startsWith("video/") ? "video" : "image",
+        });
+
+        newMedia.push({
+          url: result.secure_url,
+          thumbnail: result.resource_type === "video" ? result.thumbnail_url : result.secure_url,
+          type: result.resource_type === "video" ? "video" : "image",
+        });
+      } catch (uploadError) {
+        console.error("Error uploading media:", uploadError);
+      }
+    }
+
+    // Parse tags if it's a string
+    let parsedTags = [];
+    if (tags) {
+      if (typeof tags === "string") {
+        try {
+          parsedTags = JSON.parse(tags);
+        } catch {
+          parsedTags = tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+        }
+      } else if (Array.isArray(tags)) {
+        parsedTags = tags;
+      }
+    }
+
+    // Update post fields
+    if (title !== undefined) post.title = title;
+    if (content !== undefined) post.content = content;
+    if (category !== undefined) post.category = category;
+    if (tags !== undefined) post.tags = parsedTags;
+    if (mediaFiles.length > 0) {
+      // If new media is uploaded, replace existing media
+      post.media = newMedia;
+    }
+    post.updatedAt = new Date();
+
+    await post.save();
+
+    res.json({
+      success: true,
+      post,
+      message: "Post updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating post:", error);
+    res.json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const deletePost = async (req, res) => {
+  try {
+    console.log("Delete post endpoint called", { method: req.method, params: req.params, body: req.body });
+    const userId = req.auth.userId;
+    // Support both DELETE (from params) and POST (from body) methods
+    const postId = req.params?.postId || req.body?.postId;
+
+    if (!postId) {
+      return res.json({
+        success: false,
+        message: "Post ID is required",
+      });
+    }
+
+    const post = await ForumPost.findById(postId);
+
+    if (!post) {
+      return res.json({
+        success: false,
+        message: "Post not found",
+      });
+    }
+
+    // Check if user is the author
+    if (post.author.id.toString() !== userId) {
+      return res.json({
+        success: false,
+        message: "Unauthorized: Only the author can delete their post",
+      });
+    }
+
+    // Delete media files from Cloudinary if they exist
+    if (post.media && post.media.length > 0) {
+      for (const mediaItem of post.media) {
+        try {
+          if (mediaItem.url) {
+            // Extract public_id from Cloudinary URL
+            const urlParts = mediaItem.url.split('/');
+            const publicIdWithExt = urlParts.slice(-2).join('/').split('.')[0];
+            const resourceType = mediaItem.type === 'video' ? 'video' : 'image';
+            
+            await cloudinary.uploader.destroy(publicIdWithExt, {
+              resource_type: resourceType,
+            });
+          }
+        } catch (cloudinaryError) {
+          console.error("Error deleting media from Cloudinary:", cloudinaryError);
+          // Continue even if Cloudinary deletion fails
+        }
+      }
+    }
+
+    // Delete the post
+    await ForumPost.findByIdAndDelete(postId);
+
+    res.json({
+      success: true,
+      message: "Post deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting post:", error);
+    res.json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+

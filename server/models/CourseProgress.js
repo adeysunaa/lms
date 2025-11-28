@@ -46,6 +46,36 @@ const quizAttemptSchema = new mongoose.Schema({
   },
 });
 
+const finalAssessmentProgressSchema = new mongoose.Schema({
+  passed: {
+    type: Boolean,
+    default: false,
+  },
+  score: {
+    type: Number,
+    default: 0,
+  },
+  attempts: [{
+    score: Number,
+    correctAnswers: Number,
+    totalQuestions: Number,
+    answers: [{
+      questionId: String,
+      selectedAnswer: Number,
+      isCorrect: Boolean,
+    }],
+    attemptedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  }],
+  bestScore: {
+    type: Number,
+    default: 0,
+  },
+  completedAt: Date,
+}, { _id: false });
+
 const chapterProgressSchema = new mongoose.Schema({
   chapterId: {
     type: String,
@@ -54,6 +84,10 @@ const chapterProgressSchema = new mongoose.Schema({
   chapterTitle: String,
   lectures: [lectureProgressSchema],
   quizzes: [quizAttemptSchema],
+  finalAssessment: {
+    type: finalAssessmentProgressSchema,
+    default: null,
+  },
   completed: {
     type: Boolean,
     default: false,

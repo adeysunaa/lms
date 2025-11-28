@@ -6,6 +6,7 @@ import YouTube from "react-youtube";
 import Footer from "../../components/student/Footer";
 import Rating from "../../components/student/Rating";
 import CertificateModal from "../../components/student/CertificateModal";
+import SecureQuizWrapper from "../../components/student/SecureQuizWrapper";
 import axios from "axios";
 import { toast } from "react-toastify";
 import Loading from "../../components/student/Loading";
@@ -37,6 +38,14 @@ const Player = () => {
   const [quizAnswers, setQuizAnswers] = useState([]);
   const [quizResult, setQuizResult] = useState(null);
   const [showRatingSection, setShowRatingSection] = useState(false);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  
+  // Final Assessment state
+  const [showFinalAssessment, setShowFinalAssessment] = useState(false);
+  const [currentFinalAssessment, setCurrentFinalAssessment] = useState(null);
+  const [assessmentAnswers, setAssessmentAnswers] = useState([]);
+  const [assessmentResult, setAssessmentResult] = useState(null);
+  const [currentAssessmentQuestionIndex, setCurrentAssessmentQuestionIndex] = useState(0);
   
   // Video tracking state
   const [youtubePlayer, setYoutubePlayer] = useState(null);
@@ -367,6 +376,51 @@ const Player = () => {
     return progress.chapters[chapterIndex]?.quizzes[quizIndex]?.passed || false;
   };
 
+  const canAccessFinalAssessment = (chapterIndex) => {
+    if (!progress || !courseData) return false;
+    
+    const currentChapter = progress.chapters[chapterIndex];
+    if (!currentChapter) return false;
+
+    // All lectures must be completed
+    const allLecturesCompleted = currentChapter.lectures.every(l => l.completed);
+    
+    // All quizzes must be passed
+    const chapterData = courseData.courseContent[chapterIndex];
+    const allQuizzesPassed = !chapterData.quizzes || chapterData.quizzes.length === 0 || 
+      chapterData.quizzes.every((_, idx) => isQuizPassed(chapterIndex, idx));
+
+    return allLecturesCompleted && allQuizzesPassed;
+  };
+
+  const isFinalAssessmentPassed = (chapterIndex) => {
+    if (!progress) return false;
+    const chapter = progress.chapters[chapterIndex];
+    if (!chapter) return false;
+    return chapter.finalAssessment?.passed || false;
+  };
+
+  // Check if all final assessments are passed (required for certificate)
+  const areAllFinalAssessmentsPassed = () => {
+    if (!progress || !courseData) return true; // If no data, assume passed (backwards compatibility)
+    
+    // Check each chapter
+    for (let i = 0; i < courseData.courseContent.length; i++) {
+      const chapterData = courseData.courseContent[i];
+      const chapterProgress = progress.chapters[i];
+      
+      // If course has a final assessment for this chapter
+      if (chapterData?.finalAssessment) {
+        // Progress must show it as passed
+        if (!chapterProgress?.finalAssessment?.passed) {
+          return false;
+        }
+      }
+    }
+    
+    return true;
+  };
+
   const handleLectureClick = (chapter, lecture, chapterIndex, lectureIndex) => {
     if (!canAccessLecture(chapterIndex, lectureIndex)) {
       toast.warning('Please complete previous lectures first');
@@ -453,9 +507,118 @@ const Player = () => {
     
     setCurrentQuiz({ questions: validQuizzes, chapterIndex, quizIndex: 0 });
     setQuizAnswers(new Array(validQuizzes.length).fill(null));
+    setCurrentQuestionIndex(0);
     setShowQuiz(true);
     setQuizResult(null);
     setPlayerData(null);
+    setShowFinalAssessment(false);
+    setAssessmentResult(null);
+  };
+
+  const handleFinalAssessmentClick = (chapterIndex) => {
+    if (!canAccessFinalAssessment(chapterIndex)) {
+      toast.warning('Please complete all lectures and pass all quizzes before taking the final assessment');
+      return;
+    }
+
+    const chapter = courseData.courseContent[chapterIndex];
+    if (!chapter.finalAssessment || !chapter.finalAssessment.questions || chapter.finalAssessment.questions.length === 0) {
+      toast.error('No final assessment found for this chapter');
+      return;
+    }
+
+    setCurrentFinalAssessment({
+      ...chapter.finalAssessment,
+      chapterIndex,
+    });
+    setAssessmentAnswers(new Array(chapter.finalAssessment.questions.length).fill(null));
+    setCurrentAssessmentQuestionIndex(0);
+    setShowFinalAssessment(true);
+    setAssessmentResult(null);
+    setPlayerData(null);
+    setShowQuiz(false);
+    setQuizResult(null);
+  };
+
+  const handleAssessmentAnswerChange = (questionIndex, answerIndex) => {
+    const newAnswers = [...assessmentAnswers];
+    newAnswers[questionIndex] = answerIndex;
+    setAssessmentAnswers(newAnswers);
+  };
+
+  const handleSubmitFinalAssessment = async () => {
+    if (!currentFinalAssessment) return;
+
+    // Check if all questions are answered
+    if (assessmentAnswers.some(answer => answer === null)) {
+      toast.warning('Please answer all questions before submitting');
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      // Calculate score
+      let correctAnswers = 0;
+      const totalQuestions = currentFinalAssessment.questions.length;
+      
+      currentFinalAssessment.questions.forEach((question, index) => {
+        if (assessmentAnswers[index] === question.correctAnswer) {
+          correctAnswers++;
+        }
+      });
+
+      const score = Math.round((correctAnswers / totalQuestions) * 100);
+      const passed = score >= (currentFinalAssessment.passingScore || 70);
+
+      // Submit to backend
+      const { data } = await axios.post(
+        `${backendUrl}/api/progress/submit-final-assessment`,
+        {
+          courseId,
+          chapterIndex: currentFinalAssessment.chapterIndex,
+          answers: assessmentAnswers,
+          score,
+          passed,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (data.success) {
+        setAssessmentResult({ score, passed, correctAnswers, totalQuestions });
+        setProgress(data.progress);
+        
+        if (passed) {
+          toast.success(`Final Assessment passed! Score: ${score}%`);
+        } else {
+          toast.error(`Final Assessment failed. Score: ${score}%. You need ${currentFinalAssessment.passingScore || 70}% to pass.`);
+        }
+
+        // Check if course is completed AND assessment was passed
+        if (data.courseCompleted && passed) {
+          toast.success('🎉 Congratulations! You completed the course!');
+          
+          const certData = await axios.get(
+            `${backendUrl}/api/certificate/my-certificates`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+
+          if (certData.data.success && certData.data.certificates.length > 0) {
+            const courseCert = certData.data.certificates.find(
+              c => c.courseId._id === courseId || c.courseId === courseId
+            );
+            if (courseCert) {
+              setCertificate(courseCert);
+              setShowCertificateModal(true);
+            }
+          }
+        }
+      } else {
+        toast.error(data.message);
+      }
+    } catch (error) {
+      console.error('Final assessment submission error:', error);
+      toast.error('Failed to submit final assessment');
+    }
   };
 
   const handleQuizAnswerChange = (questionIndex, answerIndex) => {
@@ -645,54 +808,109 @@ const Player = () => {
 
                     {/* Quizzes */}
                     {chapter.quizzes && chapter.quizzes.length > 0 && (
-                      <div className="pt-4 mt-4 border-t border-white/20">
-                        {chapter.quizzes.map((quiz, quizIndex) => {
-                          const isAccessible = canAccessQuiz(chapterIndex);
-                          const isPassed = isQuizPassed(chapterIndex, quizIndex);
+                      <li
+                        className={`flex items-center justify-between gap-3 py-3 px-4 rounded-xl transition-all mt-2 pt-2 border-t border-white/20 ${
+                          canAccessQuiz(chapterIndex)
+                            ? 'hover:bg-white/10 cursor-pointer'
+                            : 'opacity-50 cursor-not-allowed'
+                        } ${
+                          showQuiz &&
+                          currentQuiz?.chapterIndex === chapterIndex
+                            ? 'bg-gradient-to-r from-blue-500/20 to-purple-500/20 border-l-0 border-r-0 border-b-0 border-t border-blue-400/30'
+                            : ''
+                        }`}
+                        onClick={() => handleQuizClick(chapterIndex, 0)}
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {(() => {
+                            const quizPassed = chapter.quizzes.some((q, idx) => isQuizPassed(chapterIndex, idx));
+                            return quizPassed ? (
+                              <i className="ri-checkbox-circle-fill text-green-400 text-xl flex-shrink-0"></i>
+                            ) : (
+                              <i className="ri-questionnaire-line text-purple-400 text-xl flex-shrink-0"></i>
+                            );
+                          })()}
+                          <div className="min-w-0 flex-1">
+                            <p className="body-small font-medium text-white truncate">
+                              Chapter Quiz
+                            </p>
+                            <p className="text-xs text-white/60 mt-0.5">
+                              {(() => {
+                                const validQuizzes = chapter.quizzes.filter(q => q && q.question && q.options && q.correctAnswer !== undefined);
+                                const totalQuestions = validQuizzes.length;
+                                return `${totalQuestions} ${totalQuestions === 1 ? 'question' : 'questions'}`;
+                              })()}
+                            </p>
+                          </div>
+                          {!canAccessQuiz(chapterIndex) && (
+                            <i className="ri-lock-line text-yellow-400 text-sm flex-shrink-0" title="Complete all lectures first"></i>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 body-small text-white/70 flex-shrink-0">
+                          {(() => {
+                            const quizPassed = chapter.quizzes.some((q, idx) => isQuizPassed(chapterIndex, idx));
+                            return quizPassed ? (
+                              <span className="px-2.5 py-1 bg-green-500/20 text-green-300 rounded-full text-xs font-medium border border-green-400/30">
+                                Passed
+                              </span>
+                            ) : (
+                              <span className="text-xs text-white/60">70% to pass</span>
+                            );
+                          })()}
+                        </div>
+                      </li>
+                    )}
 
-                          return (
-                            <li
-                              key={`quiz-${quizIndex}`}
-                              className={`flex items-center justify-between gap-3 py-4 px-4 rounded-xl transition-all ${
-                                isAccessible
-                                  ? 'hover:bg-purple-500/20 cursor-pointer border border-purple-400/30'
-                                  : 'opacity-50 cursor-not-allowed border border-white/10'
-                              } ${
-                                showQuiz &&
-                                currentQuiz?.chapterIndex === chapterIndex &&
-                                currentQuiz?.quizIndex === quizIndex
-                                  ? 'bg-gradient-to-r from-purple-500/30 to-pink-500/30'
-                                  : 'bg-purple-500/10'
-                              }`}
-                              onClick={() => handleQuizClick(chapterIndex, quizIndex)}
-                            >
-                              <div className="flex items-center gap-3 flex-1">
-                                {isPassed ? (
-                                  <i className="ri-medal-fill text-yellow-400 text-2xl"></i>
-                                ) : (
-                                  <i className="ri-questionnaire-line text-purple-400 text-2xl"></i>
-                                )}
-                                <div>
-                                  <p className="body-small font-semibold text-white">
-                                    Chapter Quiz
-                                  </p>
-                                  <p className="text-xs text-white/60 mt-1">
-                                    {quiz.length} questions • Passing: 70%
-                                  </p>
-                                </div>
-                                {!isAccessible && (
-                                  <i className="ri-lock-line text-yellow-400 text-lg" title="Complete all lectures first"></i>
-                                )}
-                              </div>
-                              {isPassed && (
-                                <span className="px-3 py-1.5 bg-green-500/20 text-green-300 rounded-full text-xs font-medium border border-green-400/30">
-                                  Passed
-                                </span>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </div>
+                    {/* Final Assessment */}
+                    {chapter.finalAssessment && (
+                      <li
+                        className={`flex items-center justify-between gap-3 py-3 px-4 rounded-xl transition-all ${
+                          chapter.quizzes && chapter.quizzes.length > 0 
+                            ? 'mt-2' 
+                            : 'mt-2 pt-2 border-t border-white/20'
+                        } ${
+                          canAccessFinalAssessment(chapterIndex)
+                            ? 'hover:bg-white/10 cursor-pointer'
+                            : 'opacity-50 cursor-not-allowed'
+                        } ${
+                          showFinalAssessment &&
+                          currentFinalAssessment?.chapterIndex === chapterIndex
+                            ? 'bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-400/30'
+                            : ''
+                        }`}
+                        onClick={() => handleFinalAssessmentClick(chapterIndex)}
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {isFinalAssessmentPassed(chapterIndex) ? (
+                            <i className="ri-checkbox-circle-fill text-green-400 text-xl flex-shrink-0"></i>
+                          ) : (
+                            <i className="ri-file-list-3-line text-orange-400 text-xl flex-shrink-0"></i>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="body-small font-medium text-white truncate">
+                              {chapter.finalAssessment.title || 'Final Assessment'}
+                            </p>
+                            <p className="text-xs text-white/60 mt-0.5">
+                              {chapter.finalAssessment.questions?.length || 0} {chapter.finalAssessment.questions?.length === 1 ? 'question' : 'questions'}
+                              {chapter.finalAssessment.timeLimit > 0 && ` • ${chapter.finalAssessment.timeLimit} min`}
+                            </p>
+                          </div>
+                          {!canAccessFinalAssessment(chapterIndex) && (
+                            <i className="ri-lock-line text-yellow-400 text-sm flex-shrink-0" title="Complete all lectures and quizzes first"></i>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 body-small text-white/70 flex-shrink-0">
+                          {isFinalAssessmentPassed(chapterIndex) ? (
+                            <span className="px-2.5 py-1 bg-green-500/20 text-green-300 rounded-full text-xs font-medium border border-green-400/30">
+                              Passed
+                            </span>
+                          ) : (
+                            <span className="text-xs text-white/60">
+                              {chapter.finalAssessment.passingScore || 70}% to pass
+                            </span>
+                          )}
+                        </div>
+                      </li>
                     )}
                   </ul>
                 </div>
@@ -721,7 +939,7 @@ const Player = () => {
                   </div>
                 </div>
 
-                {progress.certificateIssued && (
+                {progress.certificateIssued && areAllFinalAssessmentsPassed() && (
                   <button
                     onClick={() => setShowCertificateModal(true)}
                     className="w-full px-6 py-3.5 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl font-semibold hover:from-yellow-600 hover:to-orange-600 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
@@ -775,8 +993,18 @@ const Player = () => {
         {/* Right Column - Video Player / Quiz */}
         <div>
           {showQuiz && currentQuiz ? (
-            // Quiz View
-            <div className="glass-card rounded-2xl p-6 md:p-8 border border-white/20 sticky top-24">
+            // Quiz View - Secured
+            <SecureQuizWrapper isActive={!quizResult}>
+              <div className="glass-card rounded-2xl p-6 md:p-8 border border-white/20 sticky top-24">
+              {!quizResult && (
+                <div className="mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-xl">
+                  <div className="flex items-center gap-2 text-red-300 text-xs">
+                    <i className="ri-shield-check-line text-base"></i>
+                    <span className="font-semibold">Security Active:</span>
+                    <span>All exam activity is monitored and logged. Screenshots are watermarked with your information and timestamp. Unauthorized sharing will result in exam disqualification.</span>
+                  </div>
+                </div>
+              )}
               <div className="mb-6">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
@@ -820,61 +1048,173 @@ const Player = () => {
               </div>
 
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
-                {currentQuiz.questions.filter(q => q).map((question, qIndex) => {
-                  // Safety check - skip if question is undefined
-                  if (!question || !question.options) return null;
-                  
-                  return (
-                  <div
-                    key={qIndex}
-                    className="glass-light rounded-xl p-5 border border-white/20"
-                  >
-                    <p className="font-semibold text-white mb-4 body">
-                      {qIndex + 1}. {question.question}
-                    </p>
-                    <div className="space-y-2">
-                      {question.options.map((option, oIndex) => {
-                        const isSelected = quizAnswers[qIndex] === oIndex;
-                        const isCorrect = quizResult && question.correctAnswer === oIndex;
-                        const isWrong = quizResult && isSelected && question.correctAnswer !== oIndex;
+                {!quizResult && currentQuiz.questions.length > 0 ? (
+                  // Show one question at a time
+                  (() => {
+                    const question = currentQuiz.questions[currentQuestionIndex];
+                    if (!question || !question.options) return null;
+                    
+                    return (
+                      <div
+                        key={currentQuestionIndex}
+                        className="glass-light rounded-xl p-5 border border-white/20"
+                        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <p 
+                            className="font-semibold text-white body"
+                            style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                          >
+                            {currentQuestionIndex + 1}. {question.question}
+                          </p>
+                          <span className="text-xs text-white/60 bg-white/10 px-3 py-1 rounded-full">
+                            Question {currentQuestionIndex + 1} of {currentQuiz.questions.length}
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {question.options.map((option, oIndex) => {
+                            const isSelected = quizAnswers[currentQuestionIndex] === oIndex;
 
-                        return (
-                          <label
-                            key={oIndex}
-                            className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
-                              quizResult
-                                ? isCorrect
-                                  ? 'bg-green-500/20 border-green-400/50'
-                                  : isWrong
-                                  ? 'bg-red-500/20 border-red-400/50'
-                                  : 'border-white/10'
-                                : isSelected
-                                ? 'bg-blue-500/20 border-blue-400/50'
-                                : 'border-white/20 hover:bg-white/5'
+                            return (
+                              <label
+                                key={oIndex}
+                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
+                                  isSelected
+                                    ? 'bg-blue-500/20 border-blue-400/50'
+                                    : 'border-white/20 hover:bg-white/5'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`question-${currentQuestionIndex}`}
+                                  checked={isSelected}
+                                  onChange={() => handleQuizAnswerChange(currentQuestionIndex, oIndex)}
+                                  className="w-4 h-4 accent-blue-500"
+                                />
+                                <span 
+                                  className="text-white body-small flex-1"
+                                  style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                                >
+                                  {option}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        
+                        {/* Navigation buttons */}
+                        <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/10">
+                          <button
+                            type="button"
+                            onClick={() => setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1))}
+                            disabled={currentQuestionIndex === 0}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                              currentQuestionIndex === 0
+                                ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                                : 'bg-white/10 text-white hover:bg-white/20'
                             }`}
                           >
-                            <input
-                              type="radio"
-                              name={`question-${qIndex}`}
-                              checked={isSelected}
-                              onChange={() => !quizResult && handleQuizAnswerChange(qIndex, oIndex)}
-                              disabled={!!quizResult}
-                              className="w-4 h-4 accent-blue-500"
-                            />
-                            <span className="text-white body-small flex-1">{option}</span>
-                            {quizResult && isCorrect && (
-                              <i className="ri-check-line text-green-400"></i>
-                            )}
-                            {quizResult && isWrong && (
-                              <i className="ri-close-line text-red-400"></i>
-                            )}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  );
-                })}
+                            <i className="ri-arrow-left-line mr-2"></i>
+                            Previous
+                          </button>
+                          
+                          <div className="flex gap-2">
+                            {currentQuiz.questions.map((_, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setCurrentQuestionIndex(idx)}
+                                className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
+                                  idx === currentQuestionIndex
+                                    ? 'bg-blue-500 text-white'
+                                    : quizAnswers[idx] !== null
+                                    ? 'bg-green-500/30 text-green-300 border border-green-400/50'
+                                    : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                }`}
+                              >
+                                {idx + 1}
+                              </button>
+                            ))}
+                          </div>
+                          
+                          <button
+                            type="button"
+                            onClick={() => setCurrentQuestionIndex(Math.min(currentQuiz.questions.length - 1, currentQuestionIndex + 1))}
+                            disabled={currentQuestionIndex === currentQuiz.questions.length - 1}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                              currentQuestionIndex === currentQuiz.questions.length - 1
+                                ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                                : 'bg-white/10 text-white hover:bg-white/20'
+                            }`}
+                          >
+                            Next
+                            <i className="ri-arrow-right-line ml-2"></i>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : quizResult ? (
+                  // Show all questions with results after submission
+                  currentQuiz.questions.filter(q => q).map((question, qIndex) => {
+                    if (!question || !question.options) return null;
+                    
+                    return (
+                      <div
+                        key={qIndex}
+                        className="glass-light rounded-xl p-5 border border-white/20"
+                        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+                      >
+                        <p 
+                          className="font-semibold text-white mb-4 body"
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                        >
+                          {qIndex + 1}. {question.question}
+                        </p>
+                        <div className="space-y-2">
+                          {question.options.map((option, oIndex) => {
+                            const isSelected = quizAnswers[qIndex] === oIndex;
+                            const isCorrect = quizResult && question.correctAnswer === oIndex;
+                            const isWrong = quizResult && isSelected && question.correctAnswer !== oIndex;
+
+                            return (
+                              <label
+                                key={oIndex}
+                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
+                                  isCorrect
+                                    ? 'bg-green-500/20 border-green-400/50'
+                                    : isWrong
+                                    ? 'bg-red-500/20 border-red-400/50'
+                                    : 'border-white/10'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`question-${qIndex}`}
+                                  checked={isSelected}
+                                  disabled
+                                  className="w-4 h-4 accent-blue-500"
+                                />
+                                <span 
+                                  className="text-white body-small flex-1"
+                                  style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                                >
+                                  {option}
+                                </span>
+                                {isCorrect && (
+                                  <i className="ri-check-line text-green-400"></i>
+                                )}
+                                {isWrong && (
+                                  <i className="ri-close-line text-red-400"></i>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : null}
               </div>
 
               {!quizResult && (
@@ -886,7 +1226,251 @@ const Player = () => {
                   Submit Quiz
                 </button>
               )}
-            </div>
+              </div>
+            </SecureQuizWrapper>
+          ) : showFinalAssessment && currentFinalAssessment ? (
+            // Final Assessment View - Secured
+            <SecureQuizWrapper isActive={!assessmentResult}>
+              <div className="glass-card rounded-2xl p-6 md:p-8 border border-white/20 sticky top-24">
+                {!assessmentResult && (
+                  <div className="mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-xl">
+                    <div className="flex items-center gap-2 text-red-300 text-xs">
+                      <i className="ri-shield-check-line text-base"></i>
+                      <span className="font-semibold">Security Active:</span>
+                      <span>All exam activity is monitored and logged. Screenshots are watermarked with your information and timestamp. Unauthorized sharing will result in exam disqualification.</span>
+                    </div>
+                  </div>
+                )}
+                <div className="mb-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
+                      <i className="ri-file-list-3-line text-white text-2xl"></i>
+                    </div>
+                    <div>
+                      <h3 className="h4 text-white">{currentFinalAssessment.title}</h3>
+                      <p className="body-small text-white/70">
+                        {currentFinalAssessment.questions?.length || 0} questions • {currentFinalAssessment.passingScore || 70}% to pass
+                        {currentFinalAssessment.timeLimit > 0 && ` • ${currentFinalAssessment.timeLimit} minutes`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {currentFinalAssessment.description && (
+                    <div className="mb-4 p-3 bg-white/5 rounded-xl border border-white/10">
+                      <p className="text-sm text-white/80">{currentFinalAssessment.description}</p>
+                    </div>
+                  )}
+
+                  {assessmentResult && (
+                    <div
+                      className={`rounded-xl p-4 mb-4 border ${
+                        assessmentResult.passed
+                          ? 'bg-green-500/20 border-green-400/30'
+                          : 'bg-red-500/20 border-red-400/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <i
+                          className={`text-3xl ${
+                            assessmentResult.passed
+                              ? 'ri-checkbox-circle-fill text-green-400'
+                              : 'ri-close-circle-fill text-red-400'
+                          }`}
+                        ></i>
+                        <div>
+                          <p className="font-semibold text-white">
+                            {assessmentResult.passed ? 'Final Assessment Passed!' : 'Final Assessment Failed'}
+                          </p>
+                          <p className="text-sm text-white/80">
+                            Score: {assessmentResult.score}% ({assessmentResult.correctAnswers}/{assessmentResult.totalQuestions} correct)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+                  {!assessmentResult && currentFinalAssessment.questions && currentFinalAssessment.questions.length > 0 ? (
+                    // Show one question at a time
+                    (() => {
+                      const question = currentFinalAssessment.questions[currentAssessmentQuestionIndex];
+                      if (!question || !question.options) return null;
+                      
+                      return (
+                        <div
+                          key={currentAssessmentQuestionIndex}
+                          className="glass-light rounded-xl p-5 border border-white/20"
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+                        >
+                          <div className="flex items-center justify-between mb-4">
+                            <p 
+                              className="font-semibold text-white body"
+                              style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                            >
+                              {currentAssessmentQuestionIndex + 1}. {question.question}
+                            </p>
+                            <span className="text-xs text-white/60 bg-white/10 px-3 py-1 rounded-full">
+                              Question {currentAssessmentQuestionIndex + 1} of {currentFinalAssessment.questions.length}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {question.options.map((option, oIndex) => {
+                              const isSelected = assessmentAnswers[currentAssessmentQuestionIndex] === oIndex;
+
+                              return (
+                                <label
+                                  key={oIndex}
+                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
+                                    isSelected
+                                      ? 'bg-blue-500/20 border-blue-400/50'
+                                      : 'border-white/20 hover:bg-white/5'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`assessment-question-${currentAssessmentQuestionIndex}`}
+                                    checked={isSelected}
+                                    onChange={() => handleAssessmentAnswerChange(currentAssessmentQuestionIndex, oIndex)}
+                                    className="w-4 h-4 accent-blue-500"
+                                  />
+                                  <span 
+                                    className="text-white body-small flex-1"
+                                    style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                                  >
+                                    {option}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* Navigation buttons */}
+                          <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/10">
+                            <button
+                              type="button"
+                              onClick={() => setCurrentAssessmentQuestionIndex(Math.max(0, currentAssessmentQuestionIndex - 1))}
+                              disabled={currentAssessmentQuestionIndex === 0}
+                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                currentAssessmentQuestionIndex === 0
+                                  ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                                  : 'bg-white/10 text-white hover:bg-white/20'
+                              }`}
+                            >
+                              <i className="ri-arrow-left-line mr-2"></i>
+                              Previous
+                            </button>
+                            
+                            <div className="flex gap-2">
+                              {currentFinalAssessment.questions.map((_, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => setCurrentAssessmentQuestionIndex(idx)}
+                                  className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
+                                    idx === currentAssessmentQuestionIndex
+                                      ? 'bg-blue-500 text-white'
+                                      : assessmentAnswers[idx] !== null
+                                      ? 'bg-green-500/30 text-green-300 border border-green-400/50'
+                                      : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                  }`}
+                                >
+                                  {idx + 1}
+                                </button>
+                              ))}
+                            </div>
+                            
+                            <button
+                              type="button"
+                              onClick={() => setCurrentAssessmentQuestionIndex(Math.min(currentFinalAssessment.questions.length - 1, currentAssessmentQuestionIndex + 1))}
+                              disabled={currentAssessmentQuestionIndex === currentFinalAssessment.questions.length - 1}
+                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                currentAssessmentQuestionIndex === currentFinalAssessment.questions.length - 1
+                                  ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                                  : 'bg-white/10 text-white hover:bg-white/20'
+                              }`}
+                            >
+                              Next
+                              <i className="ri-arrow-right-line ml-2"></i>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : assessmentResult ? (
+                    // Show all questions with results after submission
+                    currentFinalAssessment.questions.filter(q => q).map((question, qIndex) => {
+                      if (!question || !question.options) return null;
+                      
+                      return (
+                        <div
+                          key={qIndex}
+                          className="glass-light rounded-xl p-5 border border-white/20"
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+                        >
+                          <p 
+                            className="font-semibold text-white mb-4 body"
+                            style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                          >
+                            {qIndex + 1}. {question.question}
+                          </p>
+                          <div className="space-y-2">
+                            {question.options.map((option, oIndex) => {
+                              const isSelected = assessmentAnswers[qIndex] === oIndex;
+                              const isCorrect = assessmentResult && question.correctAnswer === oIndex;
+                              const isWrong = assessmentResult && isSelected && question.correctAnswer !== oIndex;
+
+                              return (
+                                <label
+                                  key={oIndex}
+                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
+                                    isCorrect
+                                      ? 'bg-green-500/20 border-green-400/50'
+                                      : isWrong
+                                      ? 'bg-red-500/20 border-red-400/50'
+                                      : 'border-white/10'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`assessment-result-${qIndex}`}
+                                    checked={isSelected}
+                                    disabled
+                                    className="w-4 h-4 accent-blue-500"
+                                  />
+                                  <span 
+                                    className="text-white body-small flex-1"
+                                    style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: 'default' }}
+                                  >
+                                    {option}
+                                  </span>
+                                  {isCorrect && (
+                                    <i className="ri-check-line text-green-400"></i>
+                                  )}
+                                  {isWrong && (
+                                    <i className="ri-close-line text-red-400"></i>
+                                  )}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : null}
+                </div>
+
+                {!assessmentResult && (
+                  <button
+                    onClick={handleSubmitFinalAssessment}
+                    className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-xl font-semibold hover:from-orange-600 hover:to-red-700 transition-all shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <i className="ri-send-plane-line"></i>
+                    Submit Final Assessment
+                  </button>
+                )}
+              </div>
+            </SecureQuizWrapper>
           ) : playerData ? (
             // Video Player
             <div className="glass-card rounded-2xl overflow-hidden border border-white/20 sticky top-24">
@@ -908,26 +1492,26 @@ const Player = () => {
 
                 {/* Dual Progress Bars */}
                 <div className="mb-6 space-y-3">
-                  {/* Red Line - Video Timeline Position */}
+                  {/* Video Timeline Position */}
                   <div>
-                    <div className="flex justify-between text-xs text-white/60 mb-1">
-                      <span>Video Timeline</span>
+                    <div className="flex justify-between text-xs text-white/70 mb-1.5">
+                      <span className="font-medium">Video Timeline</span>
                       <span>
                         {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')} / {Math.floor(videoDuration / 60)}:{(Math.floor(videoDuration % 60)).toString().padStart(2, '0')}
                       </span>
                     </div>
-                    <div className="relative w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div className="relative w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
                       <div
-                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-red-500 to-red-600 rounded-full transition-all"
+                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-purple-400/70 via-indigo-400/70 to-blue-400/70 rounded-full transition-all duration-300 shadow-lg shadow-purple-500/20"
                         style={{ width: `${videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0}%` }}
                       ></div>
                     </div>
                   </div>
 
-                  {/* Green Line - Actual Watch Time */}
+                  {/* Actual Watch Time */}
                   <div>
-                    <div className="flex justify-between text-xs text-white/60 mb-1">
-                      <span>Watch Time</span>
+                    <div className="flex justify-between text-xs text-white/70 mb-1.5">
+                      <span className="font-medium">Watch Time</span>
                       <span>
                         {(() => {
                           const cappedWatchTime = videoDuration > 0 ? Math.min(actualWatchTime, videoDuration) : actualWatchTime;
@@ -941,7 +1525,7 @@ const Player = () => {
                             <>
                               {displayTime}:{displaySeconds.toString().padStart(2, '0')} / {displayDuration}:{displayDurationSeconds.toString().padStart(2, '0')}
                               {videoDuration > 0 && (
-                                <span className="ml-2 text-yellow-400">
+                                <span className="ml-2 text-cyan-300/90 font-semibold">
                                   ({percentage}%)
                                 </span>
                               )}
@@ -950,9 +1534,9 @@ const Player = () => {
                         })()}
                       </span>
                     </div>
-                    <div className="relative w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div className="relative w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
                       <div
-                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-500 to-green-600 rounded-full transition-all"
+                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-400/70 via-teal-400/70 to-emerald-400/70 rounded-full transition-all duration-300 shadow-lg shadow-cyan-500/20"
                         style={{ width: `${(() => {
                           const cappedWatchTime = videoDuration > 0 ? Math.min(actualWatchTime, videoDuration) : actualWatchTime;
                           return videoDuration > 0 ? Math.min(100, (cappedWatchTime / videoDuration) * 100) : 0;
@@ -963,7 +1547,7 @@ const Player = () => {
 
                   {/* Watch Time Requirement Indicator */}
                   {videoDuration > 0 && !isWatchTimeRequirementMet() && (
-                    <div className="text-xs text-yellow-400 bg-yellow-500/10 px-3 py-2 rounded-lg border border-yellow-400/20">
+                    <div className="text-xs text-cyan-300/90 bg-cyan-500/10 px-3 py-2 rounded-lg border border-cyan-400/20 backdrop-blur-sm">
                       <i className="ri-information-line mr-1"></i>
                       Watch at least 80% of the video to mark as completed ({Math.min(100, Math.round((Math.min(actualWatchTime, videoDuration) / videoDuration) * 100))}% watched)
                     </div>
@@ -976,7 +1560,7 @@ const Player = () => {
                     disabled={!isWatchTimeRequirementMet()}
                     className={`w-full px-6 py-3 rounded-xl font-semibold transition-all shadow-lg flex items-center justify-center gap-2 ${
                       isWatchTimeRequirementMet()
-                        ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 cursor-pointer"
+                        ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 cursor-pointer hover:scale-105 border border-white/30"
                         : "bg-white/10 text-white/50 cursor-not-allowed border border-white/20"
                     }`}
                   >

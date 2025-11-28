@@ -48,7 +48,7 @@ const Navbar = () => {
         <img
           src={assets.logo}
           alt="NEXT4LEARNING Logo"
-          className="cursor-pointer w-16 lg:w-20 transition-all brightness-0 invert pb-1"
+          className="cursor-pointer w-32 lg:w-40 transition-all pt-3 pb-1"
         />
       </Link>
       <div className="hidden md:flex items-center gap-4 text-white">

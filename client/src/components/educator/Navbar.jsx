@@ -28,7 +28,7 @@ const Navbar = ({ onMenuClick }) => {
           <img
             src={assets.logo}
             alt="logo"
-            className="w-16 lg:w-20 brightness-0 invert pb-1"
+            className="w-32 lg:w-40 pt-3 pb-1"
           />
           <span className="hidden md:block text-sm uppercase tracking-[0.4em] text-white/70">
             Educator

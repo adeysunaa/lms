@@ -22,8 +22,10 @@ const UpdateCourse = () => {
   const [chapters, setChapters] = useState([]);
   const [showPopup, setShowPopup] = useState(false);
   const [showQuizPopup, setShowQuizPopup] = useState(false);
+  const [showFinalAssessmentPopup, setShowFinalAssessmentPopup] = useState(false);
   const [currentChapterId, setCurrentChapterId] = useState(null);
   const [currentQuizChapterId, setCurrentQuizChapterId] = useState(null);
+  const [currentFinalAssessmentChapterId, setCurrentFinalAssessmentChapterId] = useState(null);
   const [lectureDetails, setLectureDetails] = useState({
     lectureTitle: "",
     lectureDuration: "",
@@ -31,6 +33,18 @@ const UpdateCourse = () => {
     isPreviewFree: false,
   });
   const [quizDetails, setQuizDetails] = useState({
+    question: "",
+    options: ["", "", "", ""],
+    correctIndex: 0,
+  });
+  const [finalAssessmentDetails, setFinalAssessmentDetails] = useState({
+    title: "Final Assessment",
+    description: "",
+    questions: [],
+    passingScore: 70,
+    timeLimit: 0,
+  });
+  const [currentAssessmentQuestion, setCurrentAssessmentQuestion] = useState({
     question: "",
     options: ["", "", "", ""],
     correctIndex: 0,
@@ -66,6 +80,7 @@ const UpdateCourse = () => {
           (course.courseContent || []).map((chapter) => ({
             ...chapter,
             quizzes: chapter.quizzes || [],
+            finalAssessment: chapter.finalAssessment || null,
           }))
         );
         if (quillRef.current) {
@@ -86,6 +101,7 @@ const UpdateCourse = () => {
           chapterTitle: title,
           chapterContent: [],
           quizzes: [],
+          finalAssessment: null,
           collapsed: false,
           chapterOrder:
             chapters.length > 0 ? chapters.slice(-1)[0].chapterOrder + 1 : 1,
@@ -137,6 +153,120 @@ const UpdateCourse = () => {
         })
       );
     }
+  };
+
+  const handleFinalAssessment = (action, chapterId) => {
+    if (action === "add" || action === "edit") {
+      setCurrentFinalAssessmentChapterId(chapterId);
+      const chapter = chapters.find((ch) => ch.chapterId === chapterId);
+      if (chapter && chapter.finalAssessment) {
+        setFinalAssessmentDetails({
+          title: chapter.finalAssessment.title || "Final Assessment",
+          description: chapter.finalAssessment.description || "",
+          questions: chapter.finalAssessment.questions || [],
+          passingScore: chapter.finalAssessment.passingScore || 70,
+          timeLimit: chapter.finalAssessment.timeLimit || 0,
+        });
+      } else {
+        setFinalAssessmentDetails({
+          title: "Final Assessment",
+          description: "",
+          questions: [],
+          passingScore: 70,
+          timeLimit: 0,
+        });
+      }
+      setShowFinalAssessmentPopup(true);
+    } else if (action === "remove") {
+      setChapters(
+        chapters.map((chapter) => {
+          if (chapter.chapterId === chapterId) {
+            chapter.finalAssessment = null;
+          }
+          return chapter;
+        })
+      );
+    }
+  };
+
+  const addAssessmentQuestion = () => {
+    if (!currentAssessmentQuestion.question.trim()) {
+      toast.error('Please enter a question');
+      return;
+    }
+    
+    if (currentAssessmentQuestion.options.some(opt => !opt.trim())) {
+      toast.error('Please fill all options');
+      return;
+    }
+    
+    const newQuestion = {
+      quizId: uniqid(),
+      question: currentAssessmentQuestion.question.trim(),
+      options: currentAssessmentQuestion.options.map(opt => opt.trim()),
+      correctAnswer: currentAssessmentQuestion.correctIndex,
+    };
+    
+    setFinalAssessmentDetails({
+      ...finalAssessmentDetails,
+      questions: [...finalAssessmentDetails.questions, newQuestion],
+    });
+    
+    setCurrentAssessmentQuestion({
+      question: "",
+      options: ["", "", "", ""],
+      correctIndex: 0,
+    });
+  };
+
+  const removeAssessmentQuestion = (questionIndex) => {
+    setFinalAssessmentDetails({
+      ...finalAssessmentDetails,
+      questions: finalAssessmentDetails.questions.filter((_, idx) => idx !== questionIndex),
+    });
+  };
+
+  const saveFinalAssessment = () => {
+    if (!finalAssessmentDetails.title.trim()) {
+      toast.error('Please enter an assessment title');
+      return;
+    }
+    
+    if (finalAssessmentDetails.questions.length === 0) {
+      toast.error('Please add at least one question to the assessment');
+      return;
+    }
+    
+    setChapters(
+      chapters.map((chapter) => {
+        if (chapter.chapterId === currentFinalAssessmentChapterId) {
+          chapter.finalAssessment = {
+            assessmentId: chapter.finalAssessment?.assessmentId || uniqid(),
+            title: finalAssessmentDetails.title.trim(),
+            description: finalAssessmentDetails.description.trim(),
+            questions: finalAssessmentDetails.questions,
+            passingScore: Number(finalAssessmentDetails.passingScore),
+            timeLimit: Number(finalAssessmentDetails.timeLimit),
+          };
+        }
+        return chapter;
+      })
+    );
+    
+    setShowFinalAssessmentPopup(false);
+    setFinalAssessmentDetails({
+      title: "Final Assessment",
+      description: "",
+      questions: [],
+      passingScore: 70,
+      timeLimit: 0,
+    });
+    setCurrentAssessmentQuestion({
+      question: "",
+      options: ["", "", "", ""],
+      correctIndex: 0,
+    });
+    toast.success('Final assessment saved successfully');
   };
 
   const addLecture = () => {
@@ -463,6 +593,41 @@ const UpdateCourse = () => {
                       </div>
                     ))}
                   </div>
+                  <div className="border-t border-white/10 pt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-white">Final Assessment</p>
+                      <button
+                        type="button"
+                        className="text-xs glass-button border border-white/20 rounded-full px-3 py-1"
+                        onClick={() => handleFinalAssessment("add", chapter.chapterId)}
+                      >
+                        {chapter.finalAssessment ? "Edit Assessment" : "+ Add Final Assessment"}
+                      </button>
+                    </div>
+                    {chapter.finalAssessment ? (
+                      <div className="space-y-2 py-2 text-sm text-white/80">
+                        <p className="font-medium">{chapter.finalAssessment.title}</p>
+                        <p className="text-xs text-white/60">
+                          {chapter.finalAssessment.questions?.length || 0} questions · 
+                          Passing Score: {chapter.finalAssessment.passingScore}% · 
+                          {chapter.finalAssessment.timeLimit > 0 
+                            ? `Time Limit: ${chapter.finalAssessment.timeLimit} mins`
+                            : "No time limit"}
+                        </p>
+                        <button
+                          type="button"
+                          className="text-xs text-red-400 hover:text-red-300"
+                          onClick={() => handleFinalAssessment("remove", chapter.chapterId)}
+                        >
+                          Remove Assessment
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-white/50">
+                        No final assessment added yet.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -601,6 +766,222 @@ const UpdateCourse = () => {
                 </button>
                 <button
                   onClick={() => setShowQuizPopup(false)}
+                  className="absolute top-4 right-4 text-white/60 hover:text-white"
+                >
+                  <i className="ri-close-line text-2xl"></i>
+                </button>
+              </div>
+            </div>
+          )}
+          {showFinalAssessmentPopup && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur z-50 overflow-y-auto">
+              <div className="glass-card border border-white/10 rounded-3xl p-6 w-full max-w-3xl relative text-white my-8">
+                <h2 className="text-lg font-semibold mb-4">Final Assessment</h2>
+                
+                <div className="space-y-4 mb-4">
+                  <div>
+                    <p className="text-sm text-white/70 mb-1">Assessment Title</p>
+                    <input
+                      type="text"
+                      className="w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
+                      value={finalAssessmentDetails.title}
+                      onChange={(e) =>
+                        setFinalAssessmentDetails({
+                          ...finalAssessmentDetails,
+                          title: e.target.value,
+                        })
+                      }
+                      placeholder="e.g., Module 1 Final Exam"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-sm text-white/70 mb-1">Description (Optional)</p>
+                    <textarea
+                      className="w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
+                      rows="2"
+                      value={finalAssessmentDetails.description}
+                      onChange={(e) =>
+                        setFinalAssessmentDetails({
+                          ...finalAssessmentDetails,
+                          description: e.target.value,
+                        })
+                      }
+                      placeholder="Assessment description..."
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-white/70 mb-1">Passing Score (%)</p>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        className="w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
+                        value={finalAssessmentDetails.passingScore}
+                        onChange={(e) =>
+                          setFinalAssessmentDetails({
+                            ...finalAssessmentDetails,
+                            passingScore: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm text-white/70 mb-1">Time Limit (minutes, 0 = no limit)</p>
+                      <input
+                        type="number"
+                        min="0"
+                        className="w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
+                        value={finalAssessmentDetails.timeLimit}
+                        onChange={(e) =>
+                          setFinalAssessmentDetails({
+                            ...finalAssessmentDetails,
+                            timeLimit: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-white/10 pt-4 mb-4">
+                  <h3 className="text-md font-semibold mb-3">Questions ({finalAssessmentDetails.questions.length})</h3>
+                  
+                  <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                    {finalAssessmentDetails.questions.map((q, qIdx) => (
+                      <div key={qIdx} className="glass-light border border-white/10 rounded-xl p-3">
+                        <div className="flex justify-between items-start mb-2">
+                          <p className="font-medium text-sm">{qIdx + 1}. {q.question}</p>
+                          <button
+                            type="button"
+                            onClick={() => removeAssessmentQuestion(qIdx)}
+                            className="text-red-400 hover:text-red-300"
+                          >
+                            <i className="ri-delete-bin-line"></i>
+                          </button>
+                        </div>
+                        <div className="space-y-1 pl-4">
+                          {q.options.map((opt, optIdx) => (
+                            <div
+                              key={optIdx}
+                              className={`text-xs ${
+                                optIdx === (q.correctAnswer !== undefined ? q.correctAnswer : q.correctIndex)
+                                  ? "text-green-300 font-medium"
+                                  : "text-white/60"
+                              }`}
+                            >
+                              {optIdx + 1}. {opt}
+                              {(optIdx === (q.correctAnswer !== undefined ? q.correctAnswer : q.correctIndex)) && " ✓"}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 p-4 glass-light border border-white/10 rounded-xl">
+                    <p className="text-sm font-semibold mb-3">Add New Question</p>
+                    <div className="mb-3">
+                      <input
+                        type="text"
+                        className="w-full glass-input border border-white/20 rounded-2xl py-2 px-3"
+                        placeholder="Enter question"
+                        value={currentAssessmentQuestion.question}
+                        onChange={(e) =>
+                          setCurrentAssessmentQuestion({
+                            ...currentAssessmentQuestion,
+                            question: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2 mb-3">
+                      {currentAssessmentQuestion.options.map((option, idx) => (
+                        <div key={idx} className="flex items-center gap-3">
+                          <input
+                            type="radio"
+                            name="correctOption"
+                            checked={currentAssessmentQuestion.correctIndex === idx}
+                            onChange={() =>
+                              setCurrentAssessmentQuestion({
+                                ...currentAssessmentQuestion,
+                                correctIndex: idx,
+                              })
+                            }
+                            className="accent-blue-400"
+                          />
+                          <input
+                            type="text"
+                            className="flex-1 glass-input border border-white/20 rounded-2xl py-2 px-3"
+                            placeholder={`Option ${idx + 1}`}
+                            value={option}
+                            onChange={(e) =>
+                              setCurrentAssessmentQuestion({
+                                ...currentAssessmentQuestion,
+                                options: currentAssessmentQuestion.options.map((opt, i) =>
+                                  i === idx ? e.target.value : opt
+                                ),
+                              })
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addAssessmentQuestion}
+                      className="w-full glass-button border border-white/20 rounded-full py-2 text-sm"
+                    >
+                      + Add Question
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={saveFinalAssessment}
+                    type="button"
+                    className="flex-1 glass-button border border-white/20 rounded-full py-3 text-sm font-semibold"
+                  >
+                    Save Assessment
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowFinalAssessmentPopup(false);
+                      setFinalAssessmentDetails({
+                        title: "Final Assessment",
+                        description: "",
+                        questions: [],
+                        passingScore: 70,
+                        timeLimit: 0,
+                      });
+                      setCurrentAssessmentQuestion({
+                        question: "",
+                        options: ["", "", "", ""],
+                        correctIndex: 0,
+                      });
+                    }}
+                    className="px-6 glass-button border border-white/20 rounded-full py-3 text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowFinalAssessmentPopup(false);
+                    setFinalAssessmentDetails({
+                      title: "Final Assessment",
+                      description: "",
+                      questions: [],
+                      passingScore: 70,
+                      timeLimit: 0,
+                    });
+                    setCurrentAssessmentQuestion({
+                      question: "",
+                      options: ["", "", "", ""],
+                      correctIndex: 0,
+                    });
+                  }}
                   className="absolute top-4 right-4 text-white/60 hover:text-white"
                 >
                   <i className="ri-close-line text-2xl"></i>

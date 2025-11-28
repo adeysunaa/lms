@@ -16,12 +16,22 @@ const quizSchema = new mongoose.Schema({
   correctAnswer: { type: Number, required: true },
 }, { _id: false });
 
+const finalAssessmentSchema = new mongoose.Schema({
+  assessmentId: { type: String, required: true },
+  title: { type: String, required: true },
+  description: { type: String, default: "" },
+  questions: { type: [quizSchema], default: [] },
+  passingScore: { type: Number, default: 70 }, // Percentage required to pass
+  timeLimit: { type: Number, default: 0 }, // Time limit in minutes (0 = no limit)
+}, { _id: false });
+
 const chapterSchema = new mongoose.Schema({
   chapterId: { type: String, required: true },
   chapterOrder: { type: Number, required: true },
   chapterTitle: { type: String, required: true },
   chapterContent: { type: [lectureSchema], default: [] },
   quizzes: { type: [quizSchema], default: [] },
+  finalAssessment: { type: finalAssessmentSchema, default: null },
 }, { _id: false });
 
 const courseSchema = new mongoose.Schema({
