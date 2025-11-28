@@ -16,6 +16,7 @@ import AddCourse from "./pages/educator/AddCourse";
 import MyCourses from "./pages/educator/MyCourses";
 import StudentsEnrolled from "./pages/educator/StudentsEnrolled";
 import CertificateManagement from "./pages/educator/CertificateManagement";
+import AuditTrails from "./pages/educator/AuditTrails";
 import Navbar from "./components/student/Navbar";
 import Chatbot from "./components/student/Chatbot";
 import "quill/dist/quill.snow.css";
@@ -47,6 +48,7 @@ const App = () => {
           <Route path="my-course" element={<MyCourses />} />
           <Route path="student-enrolled" element={<StudentsEnrolled />} />
           <Route path="certificates" element={<CertificateManagement />} />
+          <Route path="audit-trails" element={<AuditTrails />} />
         </Route>
       </Routes>
       <Chatbot />

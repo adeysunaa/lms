@@ -12,6 +12,7 @@ import forumRouter from './routes/forumRoute.js'
 import chatRouter from './routes/chatRoute.js'
 import certificateRouter from './routes/certificateRoutes.js'
 import progressRouter from './routes/progressRoutes.js'
+import auditTrailRouter from './routes/auditTrailRoutes.js'
 
 //initailize Express
 const app = express()
@@ -36,6 +37,7 @@ app.use('/api/forum', express.json(), forumRouter)
 app.use('/api/chat', express.json(), chatRouter)
 app.use('/api/certificate', certificateRouter)
 app.use('/api/progress', express.json(), progressRouter)
+app.use('/api/audit-trail', express.json(), auditTrailRouter)
 app.post('/stripe', express.raw({type: 'application/json'}), stripeWebhooks)
 
 //Port

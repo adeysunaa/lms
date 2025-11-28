@@ -11,6 +11,7 @@ const Sidebar = ({ mobileMenuOpen, setMobileMenuOpen }) => {
     { name: "My Courses", path: "/educator/my-course", icon: "ri-booklet-line" },
     { name: "Student Enrolled", path: "/educator/student-enrolled", icon: "ri-user-3-line" },
     { name: "Certificates", path: "/educator/certificates", icon: "ri-award-line" },
+    { name: "Audit Trails", path: "/educator/audit-trails", icon: "ri-file-history-line" },
   ];
 
   return (
@@ -104,6 +105,8 @@ const Sidebar = ({ mobileMenuOpen, setMobileMenuOpen }) => {
                     ? "Create new lesson"
                     : item.name === "Certificates"
                     ? "Manage templates"
+                    : item.name === "Audit Trails"
+                    ? "Activity history"
                     : "Overview"}
                 </span>
               </div>

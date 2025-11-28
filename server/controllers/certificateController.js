@@ -3,6 +3,7 @@ import CourseProgress from '../models/CourseProgress.js';
 import { v2 as cloudinary } from 'cloudinary';
 import connectCloudinary from '../configs/cloudinary.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createAuditLog } from './auditTrailController.js';
 
 connectCloudinary();
 
@@ -57,6 +58,22 @@ export const createTemplate = async (req, res) => {
     
     await template.save();
     
+    // Create audit log
+    await createAuditLog({
+      educatorId,
+      action: 'CERTIFICATE_TEMPLATE_CREATED',
+      resourceType: 'CERTIFICATE',
+      resourceId: template._id.toString(),
+      resourceName: templateData.templateName || 'Untitled Template',
+      description: `Created certificate template: ${templateData.templateName || 'Untitled Template'}`,
+      changes: {
+        templateName: templateData.templateName,
+        isActive: templateData.isActive,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    
     res.json({
       success: true,
       template,
@@ -105,8 +122,115 @@ export const updateTemplate = async (req, res) => {
       }
     }
     
+    const oldData = {
+      templateName: template.templateName,
+      title: template.title,
+      subtitle: template.subtitle,
+      bodyText: template.bodyText,
+      footerText: template.footerText,
+      titleColor: template.titleColor,
+      textColor: template.textColor,
+      accentColor: template.accentColor,
+      signatureName: template.signatureName,
+      signatureTitle: template.signatureTitle,
+      organizationName: template.organizationName,
+    };
+    
     Object.assign(template, updateData);
     await template.save();
+    
+    // Track changes for audit log (excluding isActive status)
+    const changes = {};
+    if (updateData.templateName && updateData.templateName !== oldData.templateName) {
+      changes.templateName = {
+        from: oldData.templateName,
+        to: updateData.templateName,
+      };
+    }
+    if (updateData.title && updateData.title !== oldData.title) {
+      changes.title = {
+        from: oldData.title,
+        to: updateData.title,
+      };
+    }
+    if (updateData.subtitle && updateData.subtitle !== oldData.subtitle) {
+      changes.subtitle = {
+        from: oldData.subtitle,
+        to: updateData.subtitle,
+      };
+    }
+    if (updateData.bodyText && updateData.bodyText !== oldData.bodyText) {
+      changes.bodyText = {
+        from: oldData.bodyText,
+        to: updateData.bodyText,
+      };
+    }
+    if (updateData.footerText && updateData.footerText !== oldData.footerText) {
+      changes.footerText = {
+        from: oldData.footerText,
+        to: updateData.footerText,
+      };
+    }
+    if (updateData.titleColor && updateData.titleColor !== oldData.titleColor) {
+      changes.titleColor = {
+        from: oldData.titleColor,
+        to: updateData.titleColor,
+      };
+    }
+    if (updateData.textColor && updateData.textColor !== oldData.textColor) {
+      changes.textColor = {
+        from: oldData.textColor,
+        to: updateData.textColor,
+      };
+    }
+    if (updateData.accentColor && updateData.accentColor !== oldData.accentColor) {
+      changes.accentColor = {
+        from: oldData.accentColor,
+        to: updateData.accentColor,
+      };
+    }
+    if (updateData.signatureName && updateData.signatureName !== oldData.signatureName) {
+      changes.signatureName = {
+        from: oldData.signatureName,
+        to: updateData.signatureName,
+      };
+    }
+    if (updateData.signatureTitle && updateData.signatureTitle !== oldData.signatureTitle) {
+      changes.signatureTitle = {
+        from: oldData.signatureTitle,
+        to: updateData.signatureTitle,
+      };
+    }
+    if (updateData.organizationName && updateData.organizationName !== oldData.organizationName) {
+      changes.organizationName = {
+        from: oldData.organizationName,
+        to: updateData.organizationName,
+      };
+    }
+    if (req.files) {
+      if (req.files.backgroundImage) {
+        changes.backgroundImage = { changed: true, note: "Background image updated" };
+      }
+      if (req.files.signatureImage) {
+        changes.signatureImage = { changed: true, note: "Signature image updated" };
+      }
+      if (req.files.organizationLogo) {
+        changes.organizationLogo = { changed: true, note: "Organization logo updated" };
+      }
+    }
+    
+    // Create audit log
+    await createAuditLog({
+      educatorId,
+      action: 'CERTIFICATE_TEMPLATE_UPDATED',
+      resourceType: 'CERTIFICATE',
+      resourceId: templateId,
+      resourceName: template.templateName,
+      description: `Updated certificate template: ${template.templateName}`,
+      changes,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
     
     res.json({
       success: true,
@@ -128,7 +252,7 @@ export const deleteTemplate = async (req, res) => {
     const educatorId = req.auth.userId;
     const { templateId } = req.params;
     
-    const template = await CertificateTemplate.findOneAndDelete({ _id: templateId, educatorId });
+    const template = await CertificateTemplate.findOne({ _id: templateId, educatorId });
     
     if (!template) {
       return res.json({
@@ -136,6 +260,23 @@ export const deleteTemplate = async (req, res) => {
         message: 'Template not found',
       });
     }
+    
+    // Create audit log before deletion
+    await createAuditLog({
+      educatorId,
+      action: 'CERTIFICATE_TEMPLATE_DELETED',
+      resourceType: 'CERTIFICATE',
+      resourceId: templateId,
+      resourceName: template.templateName,
+      description: `Deleted certificate template: ${template.templateName}`,
+      changes: {
+        deleted: true,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    
+    await CertificateTemplate.findOneAndDelete({ _id: templateId, educatorId });
     
     res.json({
       success: true,
@@ -228,6 +369,26 @@ export const issueCertificate = async (req, res) => {
       progress.certificateId = certificateId;
       await progress.save();
     }
+    
+    // Create audit log
+    await createAuditLog({
+      educatorId: course.educator._id.toString(),
+      action: 'CERTIFICATE_ISSUED',
+      resourceType: 'CERTIFICATE',
+      resourceId: certificate._id.toString(),
+      resourceName: `${student.name} - ${course.courseTitle}`,
+      description: `Issued certificate to ${student.name} for course: ${course.courseTitle}`,
+      changes: {
+        certificateId,
+        studentId,
+        courseId,
+        grade,
+      },
+      metadata: {
+        studentName: student.name,
+        courseTitle: course.courseTitle,
+      },
+    });
     
     res.json({
       success: true,
