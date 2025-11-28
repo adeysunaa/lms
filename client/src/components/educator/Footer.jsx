@@ -12,7 +12,7 @@ const Footer = () => {
         />
         <div className="hidden md:block h-8 w-px bg-white/20"></div>
         <p className="text-xs md:text-sm text-white/70">
-          © {new Date().getFullYear()} Mekong-Learning. All Rights Reserved.
+          © {new Date().getFullYear()} NEXT4LEARN. All Rights Reserved.
         </p>
       </div>
       <div className="flex items-center gap-4 mt-4 md:mt-0">

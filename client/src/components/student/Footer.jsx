@@ -51,7 +51,7 @@ const Footer = () => {
         </div>
       </div>
       <p className="caption py-3 text-center text-white/60 text-xs">
-        Copyright © {currentYear} Mekong-Learning. All Rights Reserved.
+        Copyright © {currentYear} NEXT4LEARN. All Rights Reserved.
       </p>
     </footer>
   );

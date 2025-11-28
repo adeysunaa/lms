@@ -185,13 +185,30 @@ export const submitQuiz = async (req, res) => {
       });
     }
 
-    // Get quiz questions
-    const quizQuestions = course.courseContent[chapterIndex].quizzes[quizIndex];
+    // Get quiz questions - each quiz is one question
+    const allQuizzes = course.courseContent[chapterIndex].quizzes;
     
-    if (!quizQuestions) {
+    console.log(`Total quizzes in chapter: ${allQuizzes ? allQuizzes.length : 0}`);
+    
+    // Filter out any invalid quizzes
+    const quizQuestions = allQuizzes.filter(q => q && q.question && q.options && q.correctAnswer !== undefined);
+    
+    console.log(`Valid quizzes after filtering: ${quizQuestions.length}`);
+    console.log('Quiz questions:', quizQuestions.map(q => ({ question: q.question, correctAnswer: q.correctAnswer })));
+    
+    if (!quizQuestions || quizQuestions.length === 0) {
       return res.json({
         success: false,
-        message: 'Quiz not found',
+        message: 'No valid quizzes found for this chapter',
+      });
+    }
+
+    // Validate that answers array matches quiz questions length
+    if (answers.length !== quizQuestions.length) {
+      console.log(`Answers count: ${answers.length}, Quiz questions count: ${quizQuestions.length}`);
+      return res.json({
+        success: false,
+        message: `Answer count mismatch. Expected ${quizQuestions.length} answers but got ${answers.length}`,
       });
     }
 
@@ -199,11 +216,21 @@ export const submitQuiz = async (req, res) => {
     let correctAnswers = 0;
     const answerDetails = answers.map((answer, index) => {
       const question = quizQuestions[index];
+      
+      // Safety check: if question doesn't exist at this index, skip it
+      if (!question || question.correctAnswer === undefined) {
+        return {
+          questionId: `unknown-${index}`,
+          selectedAnswer: answer,
+          isCorrect: false,
+        };
+      }
+      
       const isCorrect = answer === question.correctAnswer;
       if (isCorrect) correctAnswers++;
 
       return {
-        questionId: `q-${index}`,
+        questionId: question.quizId,
         selectedAnswer: answer,
         isCorrect,
       };
@@ -213,20 +240,22 @@ export const submitQuiz = async (req, res) => {
     const passingScore = 70; // 70% to pass
     const passed = score >= passingScore;
 
-    // Save attempt
-    const quizProgress = chapter.quizzes[quizIndex];
-    quizProgress.attempts.push({
-      score,
-      totalQuestions: quizQuestions.length,
-      answers: answerDetails,
-      attemptedAt: new Date(),
+    // Save attempt to all quiz progress entries in the chapter
+    // Since we treat all quizzes as one combined quiz
+    chapter.quizzes.forEach((quizProgress) => {
+      quizProgress.attempts.push({
+        score,
+        totalQuestions: quizQuestions.length,
+        answers: answerDetails,
+        attemptedAt: new Date(),
+      });
+
+      if (passed && !quizProgress.passed) {
+        quizProgress.passed = true;
+      }
+
+      quizProgress.bestScore = Math.max(quizProgress.bestScore, score);
     });
-
-    if (passed && !quizProgress.passed) {
-      quizProgress.passed = true;
-    }
-
-    quizProgress.bestScore = Math.max(quizProgress.bestScore, score);
 
     // Check if chapter is now complete
     const allLecturesComplete = chapter.lectures.every(l => l.completed);
@@ -241,6 +270,28 @@ export const submitQuiz = async (req, res) => {
     progress.lastAccessedAt = new Date();
     await progress.save();
 
+    // Check if course is completed after quiz submission
+    if (progress.overallProgress === 100 && !progress.certificateIssued) {
+      // Auto-issue certificate
+      try {
+        const certificateReq = {
+          body: { courseId, studentId },
+          auth: { userId: studentId },
+        };
+        const certificateRes = {
+          json: (data) => {
+            console.log('Certificate issued after quiz completion:', data);
+          },
+        };
+        await issueCertificate(certificateReq, certificateRes);
+        progress.completedAt = new Date();
+        progress.certificateIssued = true;
+        await progress.save();
+      } catch (certError) {
+        console.error('Error issuing certificate after quiz:', certError);
+      }
+    }
+
     res.json({
       success: true,
       score,
@@ -248,6 +299,7 @@ export const submitQuiz = async (req, res) => {
       correctAnswers,
       totalQuestions: quizQuestions.length,
       progress,
+      courseCompleted: progress.overallProgress === 100,
     });
   } catch (error) {
     console.error('Error submitting quiz:', error);

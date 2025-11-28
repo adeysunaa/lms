@@ -130,11 +130,49 @@ export const updateUserCourseProgress = async(req, res) => {
 //get user course progress
 export const getUserCourseProgress = async(req, res)=>{
     try {
-        const userId = req.auth.userId
+        const studentId = req.auth.userId
         const {courseId} = req.body
-        const progressData = await CourseProgress.findOne({userId, courseId})
+        const progressData = await CourseProgress.findOne({studentId, courseId})
 
-        res.json({success: true, progressData})
+        if (!progressData) {
+            return res.json({success: true, progressData: null})
+        }
+
+        // Calculate completed lectures from chapters structure
+        let lectureCompleted = []
+        let totalLectures = 0
+        let completedLectures = 0
+
+        if (progressData.chapters && Array.isArray(progressData.chapters)) {
+            progressData.chapters.forEach((chapter, chapterIndex) => {
+                if (chapter.lectures && Array.isArray(chapter.lectures)) {
+                    chapter.lectures.forEach((lecture, lectureIndex) => {
+                        totalLectures++
+                        if (lecture.completed) {
+                            completedLectures++
+                            // Create a unique lecture ID for compatibility
+                            lectureCompleted.push(lecture.lectureId || `lecture-${chapterIndex}-${lectureIndex}`)
+                        }
+                    })
+                }
+            })
+        }
+
+        // Check if course is completed
+        const isCompleted = progressData.overallProgress === 100 || progressData.completedAt !== null && progressData.completedAt !== undefined
+
+        // Return data in format compatible with frontend
+        res.json({
+            success: true, 
+            progressData: {
+                lectureCompleted,
+                totalLectures,
+                completedLectures,
+                overallProgress: progressData.overallProgress || 0,
+                completedAt: progressData.completedAt,
+                isCompleted
+            }
+        })
         
     } catch (error) {
         res.json({success: false, message: error.message})

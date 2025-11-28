@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useState, useRef } from "react";
 import { AppContext } from "../../context/AppContext";
 import { useParams } from "react-router-dom";
 import humanizeDuration from "humanize-duration";
@@ -36,6 +36,216 @@ const Player = () => {
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [quizAnswers, setQuizAnswers] = useState([]);
   const [quizResult, setQuizResult] = useState(null);
+  const [showRatingSection, setShowRatingSection] = useState(false);
+  
+  // Video tracking state
+  const [youtubePlayer, setYoutubePlayer] = useState(null);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [actualWatchTime, setActualWatchTime] = useState(0); // Total seconds actually watched
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [watchTimeInterval, setWatchTimeInterval] = useState(null);
+  const lastBackendUpdateRef = useRef(Date.now());
+  const accumulatedSecondsRef = useRef(0);
+
+  // Auto-expand rating section if user hasn't rated yet
+  useEffect(() => {
+    if (initialRating === 0) {
+      setShowRatingSection(true);
+    }
+  }, [initialRating]);
+
+  // Tab visibility API - pause video when tab is hidden
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && youtubePlayer && isPlaying) {
+        youtubePlayer.pauseVideo();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [youtubePlayer, isPlaying]);
+
+  // Track actual watch time (capped at video duration)
+  useEffect(() => {
+    if (isPlaying && youtubePlayer && videoDuration > 0) {
+      const interval = setInterval(() => {
+        setActualWatchTime(prev => {
+          // Cap watch time at video duration (100%)
+          if (prev >= videoDuration) {
+            return prev; // Don't increment beyond 100%
+          }
+          
+          const newTime = prev + 1;
+          accumulatedSecondsRef.current += 1;
+          
+          // Update backend every 10 seconds (only if not at cap)
+          const now = Date.now();
+          if (now - lastBackendUpdateRef.current >= 10000 && playerData && newTime < videoDuration) {
+            const secondsToUpdate = accumulatedSecondsRef.current;
+            updateWatchTimeInBackend(secondsToUpdate);
+            accumulatedSecondsRef.current = 0;
+            lastBackendUpdateRef.current = now;
+          }
+          
+          // Cap at video duration
+          return Math.min(newTime, videoDuration);
+        });
+      }, 1000);
+
+      setWatchTimeInterval(interval);
+      return () => {
+        clearInterval(interval);
+        setWatchTimeInterval(null);
+      };
+    } else {
+      // Save any accumulated time when paused
+      if (accumulatedSecondsRef.current > 0 && playerData) {
+        updateWatchTimeInBackend(accumulatedSecondsRef.current);
+        accumulatedSecondsRef.current = 0;
+      }
+      if (watchTimeInterval) {
+        clearInterval(watchTimeInterval);
+        setWatchTimeInterval(null);
+      }
+    }
+  }, [isPlaying, youtubePlayer, playerData, videoDuration]);
+
+  // Load existing watch time when lecture changes
+  useEffect(() => {
+    if (playerData && progress) {
+      const lecture = progress.chapters[playerData.chapterIndex]?.lectures[playerData.lectureIndex];
+      if (lecture && lecture.timeSpent) {
+        // Cap loaded watch time at video duration when video is ready
+        const loadedTime = lecture.timeSpent;
+        setActualWatchTime(loadedTime);
+      } else {
+        setActualWatchTime(0);
+      }
+      // Reset video tracking
+      setCurrentTime(0);
+      setVideoDuration(0);
+      setYoutubePlayer(null);
+      accumulatedSecondsRef.current = 0;
+      lastBackendUpdateRef.current = Date.now();
+    }
+  }, [playerData?.chapterIndex, playerData?.lectureIndex, progress]);
+
+  // Cap watch time when video duration is available
+  useEffect(() => {
+    if (videoDuration > 0 && actualWatchTime > videoDuration) {
+      setActualWatchTime(videoDuration);
+    }
+  }, [videoDuration, actualWatchTime]);
+
+  // Save watch time when component unmounts or lecture changes
+  useEffect(() => {
+    return () => {
+      if (playerData && accumulatedSecondsRef.current > 0) {
+        updateWatchTimeInBackend(accumulatedSecondsRef.current);
+      }
+      if (watchTimeInterval) {
+        clearInterval(watchTimeInterval);
+      }
+    };
+  }, [playerData]);
+
+  const updateWatchTimeInBackend = async (increment = 10) => {
+    if (!playerData) return;
+    
+    try {
+      const token = await getToken();
+      await axios.post(
+        `${backendUrl}/api/progress/update-time`,
+        {
+          courseId,
+          chapterIndex: playerData.chapterIndex,
+          lectureIndex: playerData.lectureIndex,
+          timeSpent: increment, // Increment by seconds watched
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (error) {
+      console.error('Failed to update watch time:', error);
+    }
+  };
+
+  // YouTube player event handlers
+  const timeTrackingIntervalRef = useRef(null);
+  
+  const handlePlayerReady = (event) => {
+    const player = event.target;
+    setYoutubePlayer(player);
+    
+    // Get video duration
+    const duration = player.getDuration();
+    setVideoDuration(duration);
+    
+    // Cap existing watch time at video duration
+    setActualWatchTime(prev => {
+      if (duration > 0 && prev > duration) {
+        return duration;
+      }
+      return prev;
+    });
+    
+    // Clear any existing interval
+    if (timeTrackingIntervalRef.current) {
+      clearInterval(timeTrackingIntervalRef.current);
+    }
+    
+    // Set up interval to track current time
+    const timeInterval = setInterval(() => {
+      try {
+        const current = player.getCurrentTime();
+        setCurrentTime(current);
+      } catch (e) {
+        // Player might not be ready
+      }
+    }, 500);
+
+    timeTrackingIntervalRef.current = timeInterval;
+  };
+
+  const handleStateChange = (event) => {
+    const state = event.data;
+    // YouTube player states: -1 (unstarted), 0 (ended), 1 (playing), 2 (paused), 3 (buffering), 5 (cued)
+    const wasPlaying = isPlaying;
+    setIsPlaying(state === 1);
+    
+    if (state === 0) { // Video ended
+      // Save any remaining watch time
+      if (playerData && wasPlaying) {
+        updateWatchTimeInBackend(1);
+      }
+    } else if (state === 2 && wasPlaying) { // Paused
+      // Save watch time when paused
+      if (playerData) {
+        updateWatchTimeInBackend(1);
+      }
+    }
+  };
+
+  // Cleanup time interval when player is destroyed or lecture changes
+  useEffect(() => {
+    return () => {
+      if (timeTrackingIntervalRef.current) {
+        clearInterval(timeTrackingIntervalRef.current);
+        timeTrackingIntervalRef.current = null;
+      }
+    };
+  }, [playerData?.chapterIndex, playerData?.lectureIndex]);
+
+  // Check if watch time requirement is met (e.g., 80% of video duration)
+  const isWatchTimeRequirementMet = () => {
+    if (!videoDuration || videoDuration === 0) return false;
+    const cappedWatchTime = Math.min(actualWatchTime, videoDuration);
+    const requiredWatchTime = videoDuration * 0.8; // 80% requirement
+    return cappedWatchTime >= requiredWatchTime;
+  };
 
   const getCourseData = () => {
     enrolledCourses.forEach((course) => {
@@ -230,9 +440,19 @@ const Player = () => {
       return;
     }
 
-    const quiz = courseData.courseContent[chapterIndex].quizzes[quizIndex];
-    setCurrentQuiz({ questions: quiz, chapterIndex, quizIndex });
-    setQuizAnswers(new Array(quiz.length).fill(null));
+    // Get all quizzes from the chapter - each quiz is one question
+    const quizzes = courseData.courseContent[chapterIndex].quizzes;
+    
+    // Filter out any undefined/null quizzes
+    const validQuizzes = quizzes.filter(q => q && q.question && q.options && q.correctAnswer !== undefined);
+    
+    if (validQuizzes.length === 0) {
+      toast.error('No valid quizzes found for this chapter');
+      return;
+    }
+    
+    setCurrentQuiz({ questions: validQuizzes, chapterIndex, quizIndex: 0 });
+    setQuizAnswers(new Array(validQuizzes.length).fill(null));
     setShowQuiz(true);
     setQuizResult(null);
     setPlayerData(null);
@@ -273,11 +493,33 @@ const Player = () => {
         } else {
           toast.error(`Quiz failed. Score: ${data.score}%. You need 70% to pass.`);
         }
+
+        // Check if course is completed after passing quiz
+        if (data.courseCompleted) {
+          toast.success('🎉 Congratulations! You completed the course!');
+          
+          // Fetch certificate
+          const certData = await axios.get(
+            `${backendUrl}/api/certificate/my-certificates`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+
+          if (certData.data.success && certData.data.certificates.length > 0) {
+            const courseCert = certData.data.certificates.find(
+              c => c.courseId._id === courseId || c.courseId === courseId
+            );
+            if (courseCert) {
+              setCertificate(courseCert);
+              setShowCertificateModal(true);
+            }
+          }
+        }
       } else {
         toast.error(data.message);
       }
     } catch (error) {
       toast.error('Failed to submit quiz');
+      console.error('Quiz submission error:', error);
     }
   };
 
@@ -320,17 +562,17 @@ const Player = () => {
     <>
       <div className="p-4 sm:p-10 flex flex-col-reverse lg:grid lg:grid-cols-2 gap-10 md:px-36 pt-24">
         {/* Left Column - Course Structure */}
-        <div className="text-white">
+        <div className="text-white pt-8">
           <h2 className="h3 text-white mb-6">Course Structure</h2>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             {courseData.courseContent.map((chapter, chapterIndex) => (
               <div
                 key={chapterIndex}
                 className="glass-card rounded-2xl overflow-hidden border border-white/20"
               >
                 <div
-                  className="flex items-center justify-between px-5 py-4 cursor-pointer select-none"
+                  className="flex items-center justify-between px-6 py-5 cursor-pointer select-none hover:bg-white/5 transition-colors"
                   onClick={() => toggleSection(chapterIndex)}
                 >
                   <div className="flex items-center gap-3">
@@ -354,7 +596,7 @@ const Player = () => {
                     openSections[chapterIndex] ? "max-h-[2000px]" : "max-h-0"
                   }`}
                 >
-                  <ul className="px-5 pb-4 pt-2 space-y-2 border-t border-white/10">
+                  <ul className="px-4 pb-5 pt-3 space-y-2 border-t border-white/10">
                     {/* Lectures */}
                     {chapter.chapterContent.map((lecture, lectureIndex) => {
                       const isAccessible = canAccessLecture(chapterIndex, lectureIndex);
@@ -363,7 +605,7 @@ const Player = () => {
                       return (
                         <li
                           key={lectureIndex}
-                          className={`flex items-center justify-between gap-3 py-2 px-3 rounded-xl transition-all ${
+                          className={`flex items-center justify-between gap-3 py-3 px-4 rounded-xl transition-all ${
                             isAccessible
                               ? 'hover:bg-white/10 cursor-pointer'
                               : 'opacity-50 cursor-not-allowed'
@@ -379,9 +621,9 @@ const Player = () => {
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
                             {isCompleted ? (
-                              <i className="ri-checkbox-circle-fill text-green-400 text-lg flex-shrink-0"></i>
+                              <i className="ri-checkbox-circle-fill text-green-400 text-xl flex-shrink-0"></i>
                             ) : (
-                              <i className="ri-play-circle-line text-lg text-white flex-shrink-0"></i>
+                              <i className="ri-play-circle-line text-xl text-white flex-shrink-0"></i>
                             )}
                             <p className="body-small truncate text-white">
                               {lecture.lectureTitle}
@@ -403,7 +645,7 @@ const Player = () => {
 
                     {/* Quizzes */}
                     {chapter.quizzes && chapter.quizzes.length > 0 && (
-                      <div className="pt-3 mt-3 border-t border-white/10">
+                      <div className="pt-4 mt-4 border-t border-white/20">
                         {chapter.quizzes.map((quiz, quizIndex) => {
                           const isAccessible = canAccessQuiz(chapterIndex);
                           const isPassed = isQuizPassed(chapterIndex, quizIndex);
@@ -411,7 +653,7 @@ const Player = () => {
                           return (
                             <li
                               key={`quiz-${quizIndex}`}
-                              className={`flex items-center justify-between gap-3 py-3 px-4 rounded-xl transition-all ${
+                              className={`flex items-center justify-between gap-3 py-4 px-4 rounded-xl transition-all ${
                                 isAccessible
                                   ? 'hover:bg-purple-500/20 cursor-pointer border border-purple-400/30'
                                   : 'opacity-50 cursor-not-allowed border border-white/10'
@@ -426,24 +668,24 @@ const Player = () => {
                             >
                               <div className="flex items-center gap-3 flex-1">
                                 {isPassed ? (
-                                  <i className="ri-medal-fill text-yellow-400 text-xl"></i>
+                                  <i className="ri-medal-fill text-yellow-400 text-2xl"></i>
                                 ) : (
-                                  <i className="ri-questionnaire-line text-purple-400 text-xl"></i>
+                                  <i className="ri-questionnaire-line text-purple-400 text-2xl"></i>
                                 )}
                                 <div>
                                   <p className="body-small font-semibold text-white">
                                     Chapter Quiz
                                   </p>
-                                  <p className="text-xs text-white/60">
+                                  <p className="text-xs text-white/60 mt-1">
                                     {quiz.length} questions • Passing: 70%
                                   </p>
                                 </div>
                                 {!isAccessible && (
-                                  <i className="ri-lock-line text-yellow-400" title="Complete all lectures first"></i>
+                                  <i className="ri-lock-line text-yellow-400 text-lg" title="Complete all lectures first"></i>
                                 )}
                               </div>
                               {isPassed && (
-                                <span className="px-3 py-1 bg-green-500/20 text-green-300 rounded-full text-xs font-medium border border-green-400/30">
+                                <span className="px-3 py-1.5 bg-green-500/20 text-green-300 rounded-full text-xs font-medium border border-green-400/30">
                                   Passed
                                 </span>
                               )}
@@ -461,15 +703,15 @@ const Player = () => {
           {/* Progress Summary */}
           {progress && (
             <div className="glass-card rounded-2xl p-6 mt-6 border border-white/20">
-              <h3 className="h5 text-white mb-4 flex items-center gap-2">
-                <i className="ri-progress-line text-blue-400"></i>
+              <h3 className="h5 text-white mb-5 flex items-center gap-2">
+                <i className="ri-progress-line text-blue-400 text-xl"></i>
                 Your Progress
               </h3>
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div>
-                  <div className="flex justify-between text-white/80 mb-2">
+                  <div className="flex justify-between text-white/80 mb-3">
                     <span className="body-small">Overall Completion</span>
-                    <span className="font-semibold">{progress.overallProgress}%</span>
+                    <span className="font-semibold text-white">{progress.overallProgress}%</span>
                   </div>
                   <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden">
                     <div
@@ -482,7 +724,7 @@ const Player = () => {
                 {progress.certificateIssued && (
                   <button
                     onClick={() => setShowCertificateModal(true)}
-                    className="w-full px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl font-semibold hover:from-yellow-600 hover:to-orange-600 transition-all shadow-lg flex items-center justify-center gap-2"
+                    className="w-full px-6 py-3.5 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl font-semibold hover:from-yellow-600 hover:to-orange-600 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
                   >
                     <i className="ri-trophy-line text-xl"></i>
                     View Certificate
@@ -491,6 +733,43 @@ const Player = () => {
               </div>
             </div>
           )}
+
+          {/* Rating Section - Moved to left column to avoid blocking button */}
+          <div className="glass-card rounded-2xl overflow-hidden border border-white/20 mt-6">
+            <div
+              className="flex items-center justify-between p-4 cursor-pointer hover:bg-white/5 transition-colors"
+              onClick={() => setShowRatingSection(!showRatingSection)}
+            >
+              <div className="flex items-center gap-2">
+                <i className="ri-star-line text-yellow-400 text-xl"></i>
+                <h3 className="h5 text-white">Rate This Course</h3>
+                {initialRating > 0 && (
+                  <span className="text-xs text-white/60 bg-yellow-500/20 px-2 py-1 rounded-full border border-yellow-400/30">
+                    Rated {initialRating}/5
+                  </span>
+                )}
+              </div>
+              <i
+                className={`ri-arrow-down-s-line text-xl text-white/60 transform transition-transform ${
+                  showRatingSection ? "rotate-180" : ""
+                }`}
+              ></i>
+            </div>
+            <div
+              className={`overflow-hidden transition-all duration-300 ${
+                showRatingSection ? "max-h-32 opacity-100" : "max-h-0 opacity-0"
+              }`}
+            >
+              <div className="px-4 pb-4 pt-2 border-t border-white/10">
+                <Rating initialRating={initialRating} onRate={handleRate} />
+                {initialRating > 0 && (
+                  <p className="text-xs text-white/60 mt-2">
+                    Thank you for your rating!
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right Column - Video Player / Quiz */}
@@ -541,7 +820,11 @@ const Player = () => {
               </div>
 
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
-                {currentQuiz.questions.map((question, qIndex) => (
+                {currentQuiz.questions.filter(q => q).map((question, qIndex) => {
+                  // Safety check - skip if question is undefined
+                  if (!question || !question.options) return null;
+                  
+                  return (
                   <div
                     key={qIndex}
                     className="glass-light rounded-xl p-5 border border-white/20"
@@ -590,7 +873,8 @@ const Player = () => {
                       })}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {!quizResult && (
@@ -606,25 +890,98 @@ const Player = () => {
           ) : playerData ? (
             // Video Player
             <div className="glass-card rounded-2xl overflow-hidden border border-white/20 sticky top-24">
-              <YouTube
-                videoId={playerData.videoId}
-                opts={{
-                  width: "100%",
-                  playerVars: { autoplay: 1 },
-                }}
-                className="aspect-video w-full"
-              />
+              <div className="relative">
+                <YouTube
+                  videoId={playerData.videoId}
+                  opts={{
+                    width: "100%",
+                    playerVars: { autoplay: 1 },
+                  }}
+                  className="aspect-video w-full"
+                  onReady={handlePlayerReady}
+                  onStateChange={handleStateChange}
+                />
+              </div>
 
               <div className="p-6">
                 <h3 className="h4 text-white mb-4">{playerData.title}</h3>
 
+                {/* Dual Progress Bars */}
+                <div className="mb-6 space-y-3">
+                  {/* Red Line - Video Timeline Position */}
+                  <div>
+                    <div className="flex justify-between text-xs text-white/60 mb-1">
+                      <span>Video Timeline</span>
+                      <span>
+                        {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')} / {Math.floor(videoDuration / 60)}:{(Math.floor(videoDuration % 60)).toString().padStart(2, '0')}
+                      </span>
+                    </div>
+                    <div className="relative w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-red-500 to-red-600 rounded-full transition-all"
+                        style={{ width: `${videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* Green Line - Actual Watch Time */}
+                  <div>
+                    <div className="flex justify-between text-xs text-white/60 mb-1">
+                      <span>Watch Time</span>
+                      <span>
+                        {(() => {
+                          const cappedWatchTime = videoDuration > 0 ? Math.min(actualWatchTime, videoDuration) : actualWatchTime;
+                          const displayTime = Math.floor(cappedWatchTime / 60);
+                          const displaySeconds = Math.floor(cappedWatchTime % 60);
+                          const displayDuration = Math.floor(videoDuration / 60);
+                          const displayDurationSeconds = Math.floor(videoDuration % 60);
+                          const percentage = videoDuration > 0 ? Math.min(100, Math.round((cappedWatchTime / videoDuration) * 100)) : 0;
+                          
+                          return (
+                            <>
+                              {displayTime}:{displaySeconds.toString().padStart(2, '0')} / {displayDuration}:{displayDurationSeconds.toString().padStart(2, '0')}
+                              {videoDuration > 0 && (
+                                <span className="ml-2 text-yellow-400">
+                                  ({percentage}%)
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </span>
+                    </div>
+                    <div className="relative w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-500 to-green-600 rounded-full transition-all"
+                        style={{ width: `${(() => {
+                          const cappedWatchTime = videoDuration > 0 ? Math.min(actualWatchTime, videoDuration) : actualWatchTime;
+                          return videoDuration > 0 ? Math.min(100, (cappedWatchTime / videoDuration) * 100) : 0;
+                        })()}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* Watch Time Requirement Indicator */}
+                  {videoDuration > 0 && !isWatchTimeRequirementMet() && (
+                    <div className="text-xs text-yellow-400 bg-yellow-500/10 px-3 py-2 rounded-lg border border-yellow-400/20">
+                      <i className="ri-information-line mr-1"></i>
+                      Watch at least 80% of the video to mark as completed ({Math.min(100, Math.round((Math.min(actualWatchTime, videoDuration) / videoDuration) * 100))}% watched)
+                    </div>
+                  )}
+                </div>
+
                 {!isLectureCompleted(playerData.chapterIndex, playerData.lectureIndex) && (
                   <button
                     onClick={handleCompleteLecture}
-                    className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg flex items-center justify-center gap-2"
+                    disabled={!isWatchTimeRequirementMet()}
+                    className={`w-full px-6 py-3 rounded-xl font-semibold transition-all shadow-lg flex items-center justify-center gap-2 ${
+                      isWatchTimeRequirementMet()
+                        ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 cursor-pointer"
+                        : "bg-white/10 text-white/50 cursor-not-allowed border border-white/20"
+                    }`}
                   >
                     <i className="ri-checkbox-circle-line text-xl"></i>
-                    Mark as Completed
+                    {isWatchTimeRequirementMet() ? "Mark as Completed" : "Complete Required Watch Time"}
                   </button>
                 )}
               </div>
@@ -646,15 +1003,6 @@ const Player = () => {
               </div>
             </div>
           )}
-
-          {/* Rating Section */}
-          <div className="glass-card rounded-2xl p-6 mt-6 border border-white/20">
-            <h3 className="h5 text-white mb-4 flex items-center gap-2">
-              <i className="ri-star-line text-yellow-400"></i>
-              Rate This Course
-            </h3>
-            <Rating initialRating={initialRating} onRate={handleRate} />
-          </div>
         </div>
       </div>
 

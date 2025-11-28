@@ -166,12 +166,23 @@ const UpdateCourse = () => {
   };
 
   const addQuiz = () => {
+    // Validation: Check if question and all options are filled
+    if (!quizDetails.question.trim()) {
+      toast.error('Please enter a question');
+      return;
+    }
+    
+    if (quizDetails.options.some(opt => !opt.trim())) {
+      toast.error('Please fill all options');
+      return;
+    }
+    
     setChapters(
       chapters.map((chapter) => {
         if (chapter.chapterId === currentQuizChapterId) {
           const newQuiz = {
-            question: quizDetails.question,
-            options: quizDetails.options,
+            question: quizDetails.question.trim(),
+            options: quizDetails.options.map(opt => opt.trim()),
             correctAnswer: quizDetails.correctIndex, // Save as correctAnswer for consistency
             quizId: uniqid(),
           };

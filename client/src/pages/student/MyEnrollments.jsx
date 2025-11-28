@@ -31,11 +31,29 @@ const MyEnrollments = () => {
             { headers: { Authorization: `Bearer ${token}` } }
           );
 
+          // Use data from API if available, otherwise calculate from course
           let totalLectures = calculateNoOfLectures(course);
-          const lectureCompleted = data.progressData
-            ? data.progressData.lectureCompleted.length
-            : 0;
-          return { totalLectures, lectureCompleted };
+          let lectureCompleted = 0;
+          let isCompleted = false;
+          let overallProgress = 0;
+
+          if (data.progressData) {
+            // Use API data if available
+            totalLectures = data.progressData.totalLectures || totalLectures;
+            lectureCompleted = data.progressData.completedLectures || 
+                              (data.progressData.lectureCompleted ? data.progressData.lectureCompleted.length : 0);
+            isCompleted = data.progressData.isCompleted || 
+                         data.progressData.overallProgress === 100 ||
+                         (data.progressData.completedAt !== null && data.progressData.completedAt !== undefined);
+            overallProgress = data.progressData.overallProgress || 0;
+          }
+
+          return { 
+            totalLectures, 
+            lectureCompleted,
+            isCompleted,
+            overallProgress
+          };
         })
       );
       setProgressArray(tempProgressArray);
@@ -88,20 +106,29 @@ const MyEnrollments = () => {
             </thead>
             <tbody className="divide-y divide-white/10">
               {enrolledCourses.map((course, index) => {
-                const percent =
-                  progressArray[index] && progressArray[index].totalLectures > 0
-                    ? Math.round(
-                        (progressArray[index].lectureCompleted * 100) /
-                          progressArray[index].totalLectures
-                      )
-                    : 0;
+                const progress = progressArray[index];
+                
+                // Calculate percentage - use overallProgress if available, otherwise calculate from lectures
+                const percent = progress
+                  ? (progress.overallProgress > 0 
+                      ? progress.overallProgress 
+                      : (progress.totalLectures > 0
+                          ? Math.round(
+                              (progress.lectureCompleted * 100) /
+                                progress.totalLectures
+                            )
+                          : 0))
+                  : 0;
 
-                const status =
-                  progressArray[index] &&
-                  progressArray[index].lectureCompleted ===
-                    progressArray[index].totalLectures
-                    ? "Completed"
-                    : "In progress";
+                // Check completion status - prioritize isCompleted flag, then check progress
+                const status = progress && (
+                  progress.isCompleted ||
+                  progress.overallProgress === 100 ||
+                  (progress.totalLectures > 0 && 
+                   progress.lectureCompleted === progress.totalLectures)
+                )
+                  ? "Completed"
+                  : "In progress";
 
                 return (
                   <tr
@@ -137,7 +164,7 @@ const MyEnrollments = () => {
                         <div className="relative w-full h-2 rounded-full bg-white/10 overflow-hidden">
                           <div
                             className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 rounded-full transition-all"
-                            style={{ width: `${percent}%` }}
+                            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
                           ></div>
                         </div>
                       </div>
