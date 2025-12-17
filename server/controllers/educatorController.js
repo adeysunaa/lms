@@ -93,6 +93,16 @@ export const getCourseForEdit = async (req, res) => {
         .json({ success: false, message: "Course not found" });
     }
 
+    // Check if course has enrolled students
+    if (course.enrolledStudents && course.enrolledStudents.length > 0) {
+      return res
+        .status(403)
+        .json({ 
+          success: false, 
+          message: "Cannot edit course with enrolled students. This protects student trust and legal agreements." 
+        });
+    }
+
     res.json({ success: true, course });
   } catch (error) {
     res.json({ success: false, message: error.message });
@@ -109,6 +119,16 @@ export const updateCourse = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Course not found" });
+    }
+
+    // Check if course has enrolled students - prevent editing for security and legal compliance
+    if (existingCourse.enrolledStudents && existingCourse.enrolledStudents.length > 0) {
+      return res
+        .status(403)
+        .json({ 
+          success: false, 
+          message: "Cannot update course with enrolled students. This protects student trust and legal agreements." 
+        });
     }
 
     // Save original values BEFORE updating for audit trail

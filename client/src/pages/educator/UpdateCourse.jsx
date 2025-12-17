@@ -88,7 +88,13 @@ const UpdateCourse = () => {
         }
       }
     } catch (error) {
-      toast.error("Failed to load course data");
+      // Handle specific case when course has enrolled students
+      if (error.response && error.response.status === 403) {
+        toast.error(error.response.data?.message || "Cannot edit course with enrolled students. This protects student trust and legal agreements.");
+        navigate("/educator/my-course");
+      } else {
+        toast.error(error.response?.data?.message || "Failed to load course data");
+      }
     }
   };
 
@@ -363,7 +369,13 @@ const UpdateCourse = () => {
         toast.error(data.message);
       }
     } catch (error) {
-      toast.error(error.message);
+      // Handle specific case when course has enrolled students
+      if (error.response && error.response.status === 403) {
+        toast.error(error.response.data?.message || "Cannot update course with enrolled students. This protects student trust and legal agreements.");
+        navigate("/educator/my-course");
+      } else {
+        toast.error(error.response?.data?.message || error.message);
+      }
     }
   };
 
